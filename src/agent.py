@@ -5,10 +5,10 @@ import os
 import json
 from langfuse import Langfuse
 from dotenv import load_dotenv
-from src.config import build_api_request, extract_api_response
-from src.file import write_file
-from src.logging_config import setup_logging
-from src.type import ComponentDict, SplitComponentDict, validate_component_dict, validate_split_output
+from config import build_api_request, extract_api_response
+from file import write_file
+from logging_config import setup_logging
+from type import ComponentDict, SplitComponentDict, validate_component_dict, validate_split_output
 
 # Load environment variables
 load_dotenv()
@@ -22,15 +22,53 @@ logger = logging.getLogger(__name__)
 # Agent Definitions
 # -------------------------
 
-async def make_api_call(config: dict) -> dict:
+async def make_api_call(config: dict, span) -> dict:
     """
     Makes an API call to the given endpoint with the given headers and body.
     """
     async with aiohttp.ClientSession() as session:
-        async with session.post(config["api_endpoint"], headers=config["headers"], data=config["body"]) as response:
-            if response.status != 200:
-                raise Exception("API request failed")
-            return await response.json()
+        try:
+            async with session.post(config["api_endpoint"], 
+                                  headers=config["headers"], 
+                                  data=config["body"]) as response:
+                response_text = await response.text()
+                
+                if response.status != 200:
+                    error_msg = f"API request failed with status {response.status}: {response_text}"
+                    logger.error(error_msg)
+                    logger.debug(f"Request details: endpoint={config['api_endpoint']}, headers={config['headers']}")
+                    raise Exception(error_msg)
+                
+                result = await response.json()
+                
+                # Track the API call in Langfuse
+                span.log_llm(
+                    name=config["provider"],
+                    input=config["body"],
+                    output=result,
+                    model=config["model"],
+                    startTime=span.startTime,
+                    endTime=span.endTime,
+                    metadata={
+                        "endpoint": config["api_endpoint"],
+                        "status": response.status,
+                    }
+                )
+                return result
+                
+        except aiohttp.ClientError as e:
+            error_msg = f"Network error during API call: {str(e)}"
+            logger.error(error_msg)
+            logger.debug(f"Request details: endpoint={config['api_endpoint']}, headers={config['headers']}")
+            raise Exception(error_msg) from e
+        except json.JSONDecodeError as e:
+            error_msg = f"Failed to parse API response as JSON: {str(e)}\nResponse text: {response_text}"
+            logger.error(error_msg)
+            raise Exception(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error during API call: {str(e)}"
+            logger.error(error_msg)
+            raise Exception(error_msg) from e
 
 
 async def splitting_agent(input: dict, config: dict, span) -> SplitComponentDict:
@@ -68,21 +106,38 @@ async def splitting_agent(input: dict, config: dict, span) -> SplitComponentDict
     """
     try:
         api_config = build_api_request(prompt, config)
-        response = await make_api_call(api_config)
+        
+        # Add metadata about the request
+        span.set_metadata({
+            "agent": "splitting",
+            "input": input,
+            "prompt": prompt,
+            "config": {
+                "provider": config["provider"],
+                "model": config["model"]
+            }
+        })
+        
+        response = await make_api_call(api_config, span)
         logger.info("Splitting Agent: Successfully split project")
         api_output = extract_api_response(response, config["provider"])
         
-        # Add token tracking
-        span.update_usage(
-            input_tokens=api_output["usage"]["input_tokens"],
-            output_tokens=api_output["usage"]["output_tokens"],
-            total_tokens=api_output["usage"]["total_tokens"]
-        )
-
         result = json.loads(api_output["content"])
-        return validate_split_output(result, "Splitting Agent")
+        validated_result = validate_split_output(result, "Splitting Agent")
+        
+        # Add result metadata
+        span.set_metadata({
+            "output": validated_result,
+            "tokens": api_output["usage"]
+        })
+        
+        return validated_result
 
     except Exception as e:
+        span.set_metadata({
+            "error": str(e),
+            "error_type": type(e).__name__
+        })
         logger.error("Splitting Agent: Error encountered")
         logger.debug(f"Detailed error: {str(e)}")
         raise
@@ -103,24 +158,17 @@ async def planning_agent(input: str, config: dict, span) -> ComponentDict:
     ```
 
     Output the plan and first file details in the following JSON format:
-    {
+    '{{'
         "description": "detailed plan here",
         "name": "name of first file to create",
         "path": "path to first file"
-    }
+    '}}'
     """
     try:
         api_config = build_api_request(prompt, config)
-        response = await make_api_call(api_config)
+        response = await make_api_call(api_config, span)
         logger.info(f"Planning Agent: Successfully generated plan")
         api_output = extract_api_response(response, config["provider"])
-        
-        # Add token tracking
-        span.update_usage(
-            input_tokens=api_output["usage"]["input_tokens"],
-            output_tokens=api_output["usage"]["output_tokens"],
-            total_tokens=api_output["usage"]["total_tokens"]
-        )
         
         result = json.loads(api_output["content"])
         return validate_component_dict(result, "Planning Agent")
@@ -159,16 +207,9 @@ async def development_agent(input: dict, config: dict, span) -> bool:
 
     try:
         api_config = build_api_request(prompt, config)
-        response = await make_api_call(api_config)
+        response = await make_api_call(api_config, span)
         logger.info(f"Development Agent: Successfully generated code")
         api_output = extract_api_response(response, config["provider"])
-        
-        # Add token tracking
-        span.update_usage(
-            input_tokens=api_output["usage"]["input_tokens"],
-            output_tokens=api_output["usage"]["output_tokens"],
-            total_tokens=api_output["usage"]["total_tokens"]
-        )
         
         code = api_output["content"]
 
@@ -229,18 +270,11 @@ async def expounding_agent(input: dict, config: dict, span) -> ComponentDict:
 
     try:
         api_config = build_api_request(prompt, config)
-        response = await make_api_call(api_config)
+        response = await make_api_call(api_config, span)
 
         logger.debug("Expounding Agent: Generated expanded spec")
 
         api_output = extract_api_response(response, config["provider"])
-        
-        # Add token tracking
-        span.update_usage(
-            input_tokens=api_output["usage"]["input_tokens"],
-            output_tokens=api_output["usage"]["output_tokens"],
-            total_tokens=api_output["usage"]["total_tokens"]
-        )
         
         result = json.loads(api_output["content"])
         return validate_component_dict(result, "Expounding Agent")
@@ -273,16 +307,9 @@ async def routing_agent(input: str, config: dict, span) -> str:
 
     try:
         api_config = build_api_request(prompt, config)
-        response = await make_api_call(api_config)
+        response = await make_api_call(api_config, span)
         logger.info("Routing Agent: Successfully determined route")
         api_output = extract_api_response(response, config["provider"])
-        
-        # Add token tracking
-        span.update_usage(
-            input_tokens=api_output["usage"]["input_tokens"],
-            output_tokens=api_output["usage"]["output_tokens"],
-            total_tokens=api_output["usage"]["total_tokens"]
-        )
         
         route = api_output["content"].strip().lower()
         
@@ -335,14 +362,24 @@ async def execute_workflow(description: str):
     
     try:
         # Initial planning
-        with trace.span(name="planning") as planning_span:
+        planning_span = trace.span(name="planning")
+        try:
             plan = await planning_agent(description, gemini_config, planning_span)
             planning_span.set_metadata("plan", plan)
+            planning_span.end()  # End span on success
+        except Exception as e:
+            planning_span.end(status="error", statusMessage=str(e))
+            raise
 
         # Initial splitting
-        with trace.span(name="initial_splitting") as splitting_span:
+        splitting_span = trace.span(name="initial_splitting")
+        try:
             components = await splitting_agent(plan, gemini_config, splitting_span)
             splitting_span.set_metadata("components", components)
+            splitting_span.end()  # End span on success
+        except Exception as e:
+            splitting_span.end(status="error", statusMessage=str(e))
+            raise
 
         # Process queue for components that need work
         work_queue = components["parts"]
@@ -355,30 +392,55 @@ async def execute_workflow(description: str):
             async with asyncio.TaskGroup() as tg:
                 for component in current_batch:
                     # First try to develop the component
-                    with trace.span(name=f"development_{component['name']}") as dev_span:
+                    dev_span = trace.span(name=f"development_{component['name']}")
+                    try:
                         dev_task = tg.create_task(
                             development_agent(component, claude_config, dev_span)
                         )
+                        dev_span.end()  # End span after task creation
+                    except Exception as e:
+                        dev_span.end(status="error", statusMessage=str(e))
+                        raise
                     
                     # Determine next steps
-                    with trace.span(name=f"routing_{component['name']}") as routing_span:
+                    routing_span = trace.span(name=f"routing_{component['name']}")
+                    try:
                         route = await routing_agent(component["description"], gemini_config, routing_span)
                         routing_span.set_metadata("route", route)
+                        routing_span.end()
+                    except Exception as e:
+                        routing_span.end(status="error", statusMessage=str(e))
+                        raise
+                    
+                    if route == "detail":
+                        # Need more detail - send to expounding then splitting
+                        exp_span = trace.span(name=f"expounding_{component['name']}")
+                        try:
+                            expanded = await expounding_agent(component, gemini_config, exp_span)
+                            exp_span.end()
+                        except Exception as e:
+                            exp_span.end(status="error", statusMessage=str(e))
+                            raise
                         
-                        if route == "detail":
-                            # Need more detail - send to expounding then splitting
-                            with trace.span(name=f"expounding_{component['name']}") as exp_span:
-                                expanded = await expounding_agent(component, gemini_config, exp_span)
-                                
-                            with trace.span(name=f"splitting_after_expound_{component['name']}") as split_span:
-                                split_components = await splitting_agent(expanded, gemini_config, split_span)
-                                work_queue.extend(split_components["parts"])
-                                
-                        elif route == "split":
-                            # Need to split - send to splitting
-                            with trace.span(name=f"splitting_{component['name']}") as split_span:
-                                split_components = await splitting_agent(component, gemini_config, split_span)
-                                work_queue.extend(split_components["parts"])
+                        split_span = trace.span(name=f"splitting_after_expound_{component['name']}")
+                        try:
+                            split_components = await splitting_agent(expanded, gemini_config, split_span)
+                            work_queue.extend(split_components["parts"])
+                            split_span.end()
+                        except Exception as e:
+                            split_span.end(status="error", statusMessage=str(e))
+                            raise
+                            
+                    elif route == "split":
+                        # Need to split - send to splitting
+                        split_span = trace.span(name=f"splitting_{component['name']}")
+                        try:
+                            split_components = await splitting_agent(component, gemini_config, split_span)
+                            work_queue.extend(split_components["parts"])
+                            split_span.end()
+                        except Exception as e:
+                            split_span.end(status="error", statusMessage=str(e))
+                            raise
 
         trace.end(status="success")
         logger.info("Workflow: Execution completed successfully")
@@ -388,6 +450,9 @@ async def execute_workflow(description: str):
         logger.error("Workflow: Execution failed")
         logger.debug(f"Detailed error: {str(e)}")
         raise
+    finally:
+        # Make sure all events are flushed before exiting
+        langfuse.flush()
 
 # -------------------------
 # Main Entrypoint

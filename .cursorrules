@@ -1,0 +1,3 @@
+docker-compose exec db psql -U postgres -c "\d public.profiles" | cat (this is an example of how to use supabase/docker commands in my project rn)
+bunx shadcn@latest add ___ is how we format this.
+we should always use shadcn as much as we possibly can. and beautiful tailwind css designs. 

@@ -121,7 +121,7 @@ export default function HomePage() {
                   id="projectDescription"
                   value={projectDescription}
                   onChange={(e) => setProjectDescription(e.target.value)}
-                  className="h-32 resize-none transition-all duration-200 focus:ring-2 focus:ring-primary"
+                  className="h-32 resize-none transition-all duration-200 focus:ring-2 focus:ring-primary !rounded-lg"
                   placeholder="Describe what you want to create..."
                   required
                 />

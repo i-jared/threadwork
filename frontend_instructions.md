@@ -36,10 +36,10 @@
 - [X] Add option to start new project
 
 ## 4. Backend API Integration
-- [ ] Create new server.py file
-- [ ] Implement POST /create-project endpoint
-- [ ] Implement GET /check-credits endpoint
-- [ ] Implement POST /stripe-webhook endpoint
+- [X] Create new server.py file
+- [X] Implement POST /create-project endpoint
+- [X] Implement GET /check-credits endpoint
+- [X] Implement POST /stripe-webhook endpoint
 - [ ] Add S3 upload functionality to workflow
 - [ ] Update existing agent.py imports
 

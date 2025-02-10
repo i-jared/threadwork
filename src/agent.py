@@ -154,6 +154,24 @@ async def execute_workflow(project_spec: dict, config: dict):
         logger.debug(f"Detailed error: {str(e)}")
         raise
 
+
+def get_anthropic_config(api_key: str,prompt: str, max_tokens: int = 1024, model: str = "claude-3-5-sonnet-20241022"):
+    return {
+        "api_endpoint": "https://api.anthropic.com/v1/messages",
+        "body": {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [
+                {"role": "user", "content": f"{prompt}"}
+            ]
+        },
+        "headers": {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        }
+    }
+
 # -------------------------
 # Main Entrypoint
 # -------------------------
@@ -163,9 +181,5 @@ if __name__ == '__main__':
     project_spec = {"theme": "chatbot"}
 
     # Configuration
-    config = {
-        "api_endpoint": "https://api.example.com/v1",
-        "api_key": "YOUR_API_KEY_HERE",
-    }
-    
+
     asyncio.run(execute_workflow(project_spec, config))

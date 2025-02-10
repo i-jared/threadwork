@@ -395,6 +395,6 @@ async def execute_workflow(description: str):
 
 if __name__ == '__main__':
     # Example project specification
-    project_spec = {"theme": "chatbot"}
+    project_description = "A chatbot that can answer questions and help with tasks written in react and typescript."
     
-    asyncio.run(execute_workflow(project_spec))
+    asyncio.run(execute_workflow(project_description))

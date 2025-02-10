@@ -11,7 +11,10 @@ services:
 
 # To build and run the container:
 # docker-compose up --build
-#
+
+# to run with logs
+# docker-compose logs -f threadwork
+
 # To restart the container after making changes:
 # docker-compose restart 
 

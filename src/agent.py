@@ -2,7 +2,12 @@ import asyncio
 import aiohttp
 import aiofiles
 import logging
-from langfuse import Langfuse  # Changed from langgraph to langfuse
+import os
+from langfuse import Langfuse
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # -------------------------
 # Logging Configuration
@@ -115,40 +120,39 @@ async def development_agent(plan: dict, config: dict) -> bool:
 # Workflow Execution
 # -------------------------
 
-class WorkflowManager:
-    def __init__(self, langfuse_public_key: str, langfuse_secret_key: str):
-        self.langfuse = Langfuse(
-            public_key=langfuse_public_key,
-            secret_key=langfuse_secret_key
-        )
+async def execute_workflow(project_spec: dict, config: dict):
+    """
+    Executes the workflow with Langfuse tracing
+    """
+    langfuse = Langfuse(
+        public_key=os.getenv('LANGFUSE_PUBLIC_KEY'),
+        secret_key=os.getenv('LANGFUSE_SECRET_KEY'),
+        host=os.getenv('LANGFUSE_HOST')
+    )
+    
+    trace = langfuse.trace(name="project_construction")
+    
+    try:
+        with trace.span(name="splitting") as splitting_span:
+            idea = await splitting_agent(project_spec, config)
+            splitting_span.set_metadata("idea", idea)
 
-    async def execute_workflow(self, project_spec: dict, config: dict):
-        """
-        Executes the workflow with Langfuse tracing
-        """
-        trace = self.langfuse.trace(name="project_construction")
+        with trace.span(name="planning") as planning_span:
+            plan = await planning_agent(idea, config)
+            planning_span.set_metadata("plan", plan)
+
+        with trace.span(name="development") as dev_span:
+            success = await development_agent(plan, config)
+            dev_span.set_metadata("success", success)
+
+        trace.end(status="success")
+        logger.info("Workflow: Execution completed successfully.")
         
-        try:
-            with trace.span(name="splitting") as splitting_span:
-                idea = await splitting_agent(project_spec, config)
-                splitting_span.set_metadata("idea", idea)
-
-            with trace.span(name="planning") as planning_span:
-                plan = await planning_agent(idea, config)
-                planning_span.set_metadata("plan", plan)
-
-            with trace.span(name="development") as dev_span:
-                success = await development_agent(plan, config)
-                dev_span.set_metadata("success", success)
-
-            trace.end(status="success")
-            logger.info("Workflow: Execution completed successfully.")
-            
-        except Exception as e:
-            trace.end(status="error", statusMessage=str(e))
-            logger.error("Workflow: Execution failed")
-            logger.debug(f"Detailed error: {str(e)}")
-            raise
+    except Exception as e:
+        trace.end(status="error", statusMessage=str(e))
+        logger.error("Workflow: Execution failed")
+        logger.debug(f"Detailed error: {str(e)}")
+        raise
 
 # -------------------------
 # Main Entrypoint
@@ -163,11 +167,5 @@ if __name__ == '__main__':
         "api_endpoint": "https://api.example.com/v1",
         "api_key": "YOUR_API_KEY_HERE",
     }
-
-    # Initialize and run workflow
-    workflow = WorkflowManager(
-        langfuse_public_key="your_public_key",
-        langfuse_secret_key="your_secret_key"
-    )
     
-    asyncio.run(workflow.execute_workflow(project_spec, config))
+    asyncio.run(execute_workflow(project_spec, config))

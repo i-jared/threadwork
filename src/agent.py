@@ -39,12 +39,16 @@ async def make_api_call(config: dict, span) -> dict:
                     logger.debug(f"Request details: endpoint={config['api_endpoint']}, headers={config['headers']}")
                     raise Exception(error_msg)
                 
-                result = await response.json()
+                try:
+                    result = json.loads(response_text)
+                except json.JSONDecodeError:
+                    logger.error(f"Failed to parse response as JSON: {response_text}")
+                    raise
                 
                 # Update the span with generation details
                 span.update(
                     name=f"{config['provider']}-generation",
-                    input=config["body"],
+                    input=json.loads(config["body"]),  # Parse the JSON string back to dict
                     output=result,
                     metadata={
                         "endpoint": config["api_endpoint"],
@@ -53,6 +57,8 @@ async def make_api_call(config: dict, span) -> dict:
                         "provider": config["provider"]
                     }
                 )
+                
+                logger.debug(f"API Response: {result}")
                 return result
                 
         except aiohttp.ClientError as e:

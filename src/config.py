@@ -1,4 +1,7 @@
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 def build_api_request(prompt: str, config: dict) -> dict:
     """
@@ -107,16 +110,26 @@ def get_deepseek_config(api_key: str, prompt: str, max_tokens: int = 1024, model
     }
 
 def extract_api_response(response: dict, provider: str):
-    if provider == "anthropic":
-        return get_anthropic_response(response)
-    elif provider == "gemini":
-        return get_gemini_response(response)
-    elif provider == "openai":
-        return get_openai_response(response)
-    elif provider == "deepseek":
-        return get_deepseek_response(response)
-    else:
-        raise ValueError(f"Invalid provider: {provider}")
+    """
+    Extracts the content from different API responses based on provider.
+    Adds error handling and logging.
+    """
+    try:
+        if provider == "anthropic":
+            return get_anthropic_response(response)
+        elif provider == "gemini":
+            return get_gemini_response(response)
+        elif provider == "openai":
+            return get_openai_response(response)
+        elif provider == "deepseek":
+            return get_deepseek_response(response)
+        else:
+            raise ValueError(f"Invalid provider: {provider}")
+    except Exception as e:
+        logger.error(f"Error extracting API response for provider {provider}")
+        logger.debug(f"Response: {response}")
+        logger.debug(f"Error: {str(e)}")
+        raise
 
 def get_anthropic_response(response: dict):
     return {
@@ -129,14 +142,29 @@ def get_anthropic_response(response: dict):
     }
 
 def get_gemini_response(response: dict):
-    return {
-        "content": response["candidates"][0]["content"]["parts"][0]["text"].strip(),
-        "usage": {
-            "input_tokens": response["usageMetadata"]["promptTokenCount"],
-            "output_tokens": response["usageMetadata"]["candidatesTokenCount"],
-            "total_tokens": response["usageMetadata"]["totalTokenCount"]
+    try:
+        # Check if response has the expected structure
+        if "candidates" not in response or not response["candidates"]:
+            logger.error(f"Unexpected Gemini response structure: {response}")
+            raise ValueError("Invalid Gemini response structure")
+
+        content = response["candidates"][0]["content"]["parts"][0]["text"].strip()
+        
+        # Some Gemini responses might not include usage metadata
+        usage = {
+            "input_tokens": response.get("usageMetadata", {}).get("promptTokenCount", 0),
+            "output_tokens": response.get("usageMetadata", {}).get("candidatesTokenCount", 0),
+            "total_tokens": response.get("usageMetadata", {}).get("totalTokenCount", 0)
         }
-    }
+
+        return {
+            "content": content,
+            "usage": usage
+        }
+    except (KeyError, IndexError) as e:
+        logger.error(f"Error parsing Gemini response: {str(e)}")
+        logger.debug(f"Response: {response}")
+        raise ValueError(f"Failed to parse Gemini response: {str(e)}") from e
 
 def get_openai_response(response: dict):
     return {

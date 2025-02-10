@@ -1,14 +1,47 @@
-def build_api_request(prompt: str, config: dict):
+import json
+
+def build_api_request(prompt: str, config: dict) -> dict:
+    """
+    Builds the API request configuration based on the provider.
+    """
     if config["provider"] == "anthropic":
-        return get_anthropic_config(config["api_key"], prompt, config["max_tokens"], config["model"])
+        return {
+            "api_endpoint": "https://api.anthropic.com/v1/messages",
+            "headers": {
+                "Content-Type": "application/json",
+                "x-api-key": config["api_key"],
+                "anthropic-version": "2023-06-01"
+            },
+            "body": json.dumps({
+                "model": config["model"],
+                "max_tokens": config["max_tokens"],
+                "messages": [{"role": "user", "content": prompt}]
+            }),
+            "provider": config["provider"],
+            "model": config["model"]
+        }
     elif config["provider"] == "gemini":
-        return get_gemini_config(config["api_key"], prompt, config["max_tokens"], config["model"])
+        return {
+            "api_endpoint": f"https://generativelanguage.googleapis.com/v1beta/models/{config['model']}:generateContent?key={config['api_key']}",
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "body": json.dumps({
+                "contents": [{
+                    "parts": [{
+                        "text": prompt
+                    }]
+                }]
+            }),
+            "provider": config["provider"],
+            "model": config["model"]
+        }
     elif config["provider"] == "openai":
         return get_openai_config(config["api_key"], prompt, config["max_tokens"], config["model"])
     elif config["provider"] == "deepseek":
         return get_deepseek_config(config["api_key"], prompt, config["max_tokens"], config["model"])
     else:
-        raise ValueError(f"Invalid provider: {config['provider']}")
+        raise ValueError(f"Unsupported provider: {config['provider']}")
 
 def get_anthropic_config(api_key: str, prompt: str, max_tokens: int = 1024, model: str = "claude-3-5-sonnet-20241022"):
     return {

@@ -41,17 +41,16 @@ async def make_api_call(config: dict, span) -> dict:
                 
                 result = await response.json()
                 
-                # Track the API call in Langfuse
-                span.log_llm(
-                    name=config["provider"],
+                # Update the span with generation details
+                span.update(
+                    name=f"{config['provider']}-generation",
                     input=config["body"],
                     output=result,
-                    model=config["model"],
-                    startTime=span.startTime,
-                    endTime=span.endTime,
                     metadata={
                         "endpoint": config["api_endpoint"],
                         "status": response.status,
+                        "model": config["model"],
+                        "provider": config["provider"]
                     }
                 )
                 return result
@@ -85,24 +84,24 @@ async def splitting_agent(input: dict, config: dict, span) -> SplitComponentDict
     logger.info("Splitting Agent: Starting splitting process.")
     prompt = f"""Split the following {input['type']} description into smaller chunks, preserving the original name and type.
     Each part should be a single component or a single part of a component.
-    
-    ```
+
+    <start description>
     {input['description']}
-    ```
-    
+    <end description>
+
     The format should be as follows, with absolutely no other text or characters.
 
-    '{{'
+    \'{{'
         "name": "{input['name']}",
         "type": "{input['type']}",
         "parts": [
-            '{{'
+            \'{{'
                 "name": "generated name of the described part",
                 "description": "generated description of the part",
                 "type": "type of the part, either 'component' or 'page'"
-            '}}'
+            \'}}'
         ]
-    '}}'
+    \'}}'
     """
     try:
         api_config = build_api_request(prompt, config)
@@ -158,14 +157,14 @@ async def planning_agent(input: str, config: dict, span) -> ComponentDict:
     ```
 
     Output the plan and first file details in the following JSON format:
-    '{{'
+    {{
         "description": "detailed plan here",
         "name": "name of first file to create",
         "path": "path to first file"
-    '}}'
-    """
+    }}"""
     try:
         api_config = build_api_request(prompt, config)
+        logger.info(f"Planning Agent: API Config: {api_config}")
         response = await make_api_call(api_config, span)
         logger.info(f"Planning Agent: Successfully generated plan")
         api_output = extract_api_response(response, config["provider"])
@@ -197,9 +196,9 @@ async def development_agent(input: dict, config: dict, span) -> bool:
     prompt = f"""
     Write the code for the following page or component:
     
-    ```
+    <start description>
     {input["description"]}
-    ```
+    <end description>
 
     Output just the code, nothing else.
     """
@@ -254,16 +253,17 @@ async def expounding_agent(input: dict, config: dict, span) -> ComponentDict:
     Preserve the original name and type.
     Return the result in the following format, with absolutely no other text or characters:
 
-    '{{'
+    \'{{'
         "name": "{input['name']}",
         "type": "{input['type']}",
         "description": "expanded detailed description"
-    '}}'
+    \'}}'
 
     Input description:
-    ```
+
+    <start description>
     {input['description']}
-    ```
+    <end description>
 
     Output just the JSON object, nothing else.
     """
@@ -298,9 +298,9 @@ async def routing_agent(input: str, config: dict, span) -> str:
     2. Contains multiple components and should be split up (output "split")
     3. Has enough detail and is focused enough to be written to one file (output "write")
 
-    ```
+    <start description>
     {input}
-    ```
+    <end description>
 
     Output ONLY one of these three words: "detail", "split", or "write"
     """

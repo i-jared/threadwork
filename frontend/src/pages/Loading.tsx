@@ -1,4 +1,3 @@
-import React from 'react';
 
 export default function LoadingScreen() {
   // TODO: Add progress feedback if possible

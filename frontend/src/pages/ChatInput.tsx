@@ -1,4 +1,3 @@
-import React from 'react';
 
 export default function ChatInputPage() {
   // TODO: Create app description input form

@@ -1,9 +1,8 @@
-import React from 'react';
 
 export default function LoginPage() {
   // Placeholder for Supabase auth integration with supabase-js
   // TODO: Set up auth.uid() storage in Supabase records
-  // TODO: Create minimal login form and add registration option
+  // TODO: Create minimafl login form and add registration option
 
   return (
     <div>

@@ -6,7 +6,7 @@ import { defineConfig } from "vite"
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-// https://vite.dev/config/
+// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -14,4 +14,11 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src")
     }
   },
+  server: {
+    port: 5173,
+    host: true, // Needed for proper WebSocket connection
+    watch: {
+      usePolling: true // Helps with some file system issues
+    }
+  }
 })

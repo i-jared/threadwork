@@ -44,14 +44,14 @@
 - [ ] Update existing agent.py imports
 
 ## 5. Supabase Setup
-- [ ] Install Supabase CLI locally
-- [ ] Initialize local Supabase project
-- [ ] Create database tables:
-  - [ ] users (with UID)
-  - [ ] projects
-  - [ ] credits
-- [ ] Set up migrations folder: db/migrations
-- [ ] Implement backend Supabase integration
+- [X] Install Supabase CLI locally
+- [X] Initialize local Supabase project
+- [X] Create database tables:
+  - [X] profiles
+  - [X] projects
+  - [X] credits
+- [X] Set up migrations folder: db/migrations
+- [X] Implement backend Supabase integration
 
 ## 6. Stripe Integration
 - [ ] Set up Stripe account and API keys

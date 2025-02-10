@@ -1,6 +1,8 @@
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom'
 import SuccessPage from './pages/Success'
 import { useEffect } from 'react'
+import HomePage from './pages/Home'
+import BillingPage from './pages/Billing'
 
 // Component to log route changes
 function RouteLogger() {
@@ -37,6 +39,9 @@ function App() {
                 <Link to="/success" className="flex items-center px-2 py-2 text-gray-900">
                   Success Page
                 </Link>
+                <Link to="/billing" className="flex items-center px-2 py-2 text-gray-900">
+                  Credits & Billing
+                </Link>
               </div>
             </div>
           </div>
@@ -44,8 +49,9 @@ function App() {
 
         <main>
           <Routes>
-            <Route path="/" element={<div>Home Page</div>} />
+            <Route path="/" element={<HomePage />} />
             <Route path="/success" element={<SuccessPage />} />
+            <Route path="/billing" element={<BillingPage />} />
           </Routes>
         </main>
       </div>

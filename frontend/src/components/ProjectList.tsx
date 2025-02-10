@@ -1,5 +1,15 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Skeleton } from "@/components/ui/skeleton"
 
 interface Project {
   id: number
@@ -57,35 +67,77 @@ export function ProjectList() {
     }
   }, [])
 
-  if (loading) return <div className="p-4">Loading projects...</div>
-  if (error) return <div className="p-4 text-red-500">Error: {error}</div>
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <h2 className="text-2xl font-bold">Projects</h2>
+        <div className="space-y-4">
+          {[1, 2, 3].map((i) => (
+            <Card key={i}>
+              <CardHeader>
+                <Skeleton className="h-4 w-[250px]" />
+                <Skeleton className="h-4 w-[200px]" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-4 w-[300px]" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <Card className="border-destructive">
+        <CardHeader>
+          <CardTitle className="text-destructive">Error</CardTitle>
+          <CardDescription>{error}</CardDescription>
+        </CardHeader>
+      </Card>
+    )
+  }
 
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-bold">Projects ({projects.length})</h2>
-      {projects.length === 0 ? (
-        <p>No projects found</p>
-      ) : (
-        <div className="grid gap-4">
-          {projects.map((project) => (
-            <div key={project.id} className="p-4 border rounded-lg hover:bg-gray-50">
-              <h3 className="font-semibold">{project.project_data?.name || 'Unnamed Project'}</h3>
-              <p className="text-gray-600">{project.project_data?.description || 'No description'}</p>
-              <div className="mt-2 flex items-center gap-2">
-                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
-                  ${project.project_data?.status === 'completed' ? 'bg-green-100 text-green-800' : 
-                    project.project_data?.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 
-                    'bg-gray-100 text-gray-800'}`}>
-                  {project.project_data?.status || 'Unknown'}
-                </span>
-                <span className="text-xs text-gray-500">
-                  {new Date(project.created_at).toLocaleDateString()}
-                </span>
-              </div>
-            </div>
-          ))}
+      <ScrollArea className="h-[600px] rounded-md border">
+        <div className="p-4 space-y-4">
+          {projects.length === 0 ? (
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-center text-muted-foreground">No projects found</p>
+              </CardContent>
+            </Card>
+          ) : (
+            projects.map((project) => (
+              <Card key={project.id}>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>{project.project_data?.name || 'Unnamed Project'}</CardTitle>
+                    <Badge variant={
+                      project.project_data?.status === 'completed' ? 'success' :
+                      project.project_data?.status === 'in_progress' ? 'default' :
+                      'secondary'
+                    }>
+                      {project.project_data?.status || 'Unknown'}
+                    </Badge>
+                  </div>
+                  <CardDescription>
+                    {new Date(project.created_at).toLocaleDateString()}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-muted-foreground">
+                    {project.project_data?.description || 'No description'}
+                  </p>
+                </CardContent>
+              </Card>
+            ))
+          )}
         </div>
-      )}
+      </ScrollArea>
     </div>
   )
 } 

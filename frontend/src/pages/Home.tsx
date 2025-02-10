@@ -1,6 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { Textarea } from "@/components/ui/textarea"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { AlertCircle, Loader2, CreditCard } from "lucide-react"
+import { Label } from "@/components/ui/label"
 
 export default function HomePage() {
   const navigate = useNavigate()
@@ -58,64 +64,65 @@ export default function HomePage() {
       <h1 className="text-3xl font-bold mb-8">Create New Project</h1>
       
       {error && (
-        <div className="mb-4 p-4 bg-red-50 text-red-500 rounded-lg">
-          Error: {error}
-        </div>
+        <Alert variant="destructive" className="mb-6">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div>
-          <label 
-            htmlFor="projectDescription" 
-            className="block text-sm font-medium text-gray-700 mb-2"
-          >
-            Describe Your Project
-          </label>
-          <textarea
-            id="projectDescription"
-            value={projectDescription}
-            onChange={(e) => setProjectDescription(e.target.value)}
-            className="w-full h-32 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            placeholder="Describe what you want to create..."
-            required
-          />
-        </div>
+      <Card>
+        <CardContent className="pt-6">
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="space-y-2">
+              <Label htmlFor="projectDescription">
+                Describe Your Project
+              </Label>
+              <Textarea
+                id="projectDescription"
+                value={projectDescription}
+                onChange={(e) => setProjectDescription(e.target.value)}
+                className="h-32"
+                placeholder="Describe what you want to create..."
+                required
+              />
+            </div>
 
-        <div className="flex items-center justify-between">
-          <button
-            type="submit"
-            disabled={loading}
-            className={`px-4 py-2 rounded-lg text-white ${
-              loading 
-                ? 'bg-blue-300 cursor-not-allowed' 
-                : 'bg-blue-500 hover:bg-blue-600'
-            }`}
-          >
-            {loading ? 'Creating Project...' : 'Create Project'}
-          </button>
+            <div className="flex items-center justify-between">
+              <Button 
+                type="submit" 
+                disabled={loading}
+                className="w-full sm:w-auto"
+              >
+                {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {loading ? 'Creating Project...' : 'Create Project'}
+              </Button>
 
-          <button
-            type="button"
-            onClick={() => navigate('/billing')}
-            className="text-blue-500 hover:underline"
-          >
-            Check Credits
-          </button>
-        </div>
-      </form>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => navigate('/billing')}
+                className="w-full sm:w-auto sm:ml-4"
+              >
+                <CreditCard className="mr-2 h-4 w-4" />
+                Check Credits
+              </Button>
+            </div>
+          </form>
 
-      {loading && (
-        <div className="mt-8">
-          <div className="animate-pulse space-y-4">
-            <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-            <div className="h-4 bg-gray-200 rounded w-1/2"></div>
-            <div className="h-4 bg-gray-200 rounded w-5/6"></div>
-          </div>
-          <p className="mt-4 text-sm text-gray-500">
-            Processing your request... This may take a few moments.
-          </p>
-        </div>
-      )}
+          {loading && (
+            <div className="mt-8 space-y-4">
+              <div className="space-y-2">
+                <div className="h-4 bg-muted animate-pulse rounded w-3/4" />
+                <div className="h-4 bg-muted animate-pulse rounded w-1/2" />
+                <div className="h-4 bg-muted animate-pulse rounded w-5/6" />
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Processing your request... This may take a few moments.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 } 

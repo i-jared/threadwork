@@ -1,0 +1,21 @@
+2025-02-10 15:29:03,790 - __main__ - INFO - Planning Agent: Starting planning process.
+2025-02-10 15:30:19,829 - __main__ - INFO - Planning Agent: Starting planning process.
+2025-02-10 15:30:19,957 - __main__ - ERROR - Planning Agent: Error encountered
+2025-02-10 15:35:50,912 - __main__ - INFO - Planning Agent: Starting planning process.
+2025-02-10 15:35:51,042 - __main__ - ERROR - API request failed with status 400: {
+  "error": {
+    "code": 400,
+    "message": "Invalid JSON payload received. Unexpected token.\ncontents=%7B%27parts\n^",
+    "status": "INVALID_ARGUMENT"
+  }
+}
+
+2025-02-10 15:35:51,042 - __main__ - ERROR - Unexpected error during API call: API request failed with status 400: {
+  "error": {
+    "code": 400,
+    "message": "Invalid JSON payload received. Unexpected token.\ncontents=%7B%27parts\n^",
+    "status": "INVALID_ARGUMENT"
+  }
+}
+
+2025-02-10 15:35:51,042 - __main__ - ERROR - Planning Agent: Error encountered

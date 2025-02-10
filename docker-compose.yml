@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   threadwork:
     build: .
@@ -6,8 +8,10 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
-    # Run main.py without using watchgod. You'll need to restart the container manually.
     command: python /app/main.py
+
+volumes:
+  postgres-data:
 
 # To build and run the container:
 # docker-compose up --build

@@ -4,36 +4,36 @@
 - [X] Create frontend directory: `bun create vite@latest`
 - [X] Navigate to frontend and install dependencies: `bun install`
 - [X] Install and configure shadcn UI following [Vite instructions](https://ui.shadcn.com/docs/installation/vite) 
-- [ ] Install Tailwind CSS (@3.4.17) and PostCSS dependencies
-- [ ] Configure Tailwind and PostCSS for minimal, responsive UI
+- [X] Install Tailwind CSS (@3.4.17) and PostCSS dependencies
+- [X] Configure Tailwind and PostCSS for minimal, responsive UI
 
 ## 2. Environment Setup
-- [ ] Create `.env` in frontend directory
-- [ ] Add Supabase public key and URL
-- [ ] Add Stripe public key
-- [ ] Add AWS S3 bucket URL
+- [X] Create `.env` in frontend directory
+- [X] Add Supabase public key and URL
+- [X] Add Stripe public key
+- [X] Add AWS S3 bucket URL
 
 ## 3. Create Page Structure
 ### Login/Register Page
 - [ ] Implement Supabase auth with supabase-js
 - [ ] Set up auth.uid() storage in Supabase records
-- [ ] Create minimal login form
+- [X] Create minimal login form
 - [ ] Add registration option
 
 ### Chat Input Page
-- [ ] Create app description input form
+- [X] Create app description input form
 - [ ] Implement credit check before submission
 - [ ] Add redirect to billing if credits insufficient
 - [ ] Implement submission handler
 
 ### Loading Screen
-- [ ] Create loading indicator component
+- [X] Create loading indicator component
 - [ ] Add progress feedback if possible
 
 ### Success Page
-- [ ] Display completion message
-- [ ] Show S3 download link
-- [ ] Add option to start new project
+- [X] Display completion message
+- [X] Show S3 download link
+- [X] Add option to start new project
 
 ## 4. Backend API Integration
 - [ ] Create new server.py file

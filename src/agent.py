@@ -5,7 +5,7 @@ import logging
 import os
 from langfuse import Langfuse
 from dotenv import load_dotenv
-
+from config import build_api_request
 # Load environment variables
 load_dotenv()
 
@@ -153,24 +153,6 @@ async def execute_workflow(project_spec: dict, config: dict):
         logger.error("Workflow: Execution failed")
         logger.debug(f"Detailed error: {str(e)}")
         raise
-
-
-def get_anthropic_config(api_key: str,prompt: str, max_tokens: int = 1024, model: str = "claude-3-5-sonnet-20241022"):
-    return {
-        "api_endpoint": "https://api.anthropic.com/v1/messages",
-        "body": {
-            "model": model,
-            "max_tokens": max_tokens,
-            "messages": [
-                {"role": "user", "content": f"{prompt}"}
-            ]
-        },
-        "headers": {
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
-        }
-    }
 
 # -------------------------
 # Main Entrypoint

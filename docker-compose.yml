@@ -1,0 +1,25 @@
+services:
+  threadwork:
+    build: .
+    container_name: threadwork-container
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    # Run main.py without using watchgod. You'll need to restart the container manually.
+    command: python /app/main.py
+
+# To build and run the container:
+# docker-compose up --build
+#
+# To restart the container after making changes:
+# docker-compose restart 
+
+# to remove container
+# docker rm threadwork-container
+
+# to remove image
+# docker rmi threadwork-image
+
+# to remove all containers
+# docker rm $(docker ps -a -q)

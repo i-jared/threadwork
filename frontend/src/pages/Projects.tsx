@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { getProjectDownloadUrl } from '../lib/storage-utils';
 
 interface Project {
   id: number;
@@ -111,11 +112,16 @@ export default function ProjectsPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-col sm:flex-row gap-3">
-                <Button variant="secondary" className="group" asChild>
-                  <Link to="#" className="inline-flex items-center">
-                    <Download className="mr-2 h-4 w-4 transition-transform group-hover:-translate-y-0.5" />
-                    Download from S3
-                  </Link>
+                <Button 
+                  variant="secondary" 
+                  className="group" 
+                  onClick={async () => {
+                    const url = await getProjectDownloadUrl(latestProject.id.toString())
+                    if (url) window.open(url, '_blank')
+                  }}
+                >
+                  <Download className="mr-2 h-4 w-4 transition-transform group-hover:-translate-y-0.5" />
+                  Download Project
                 </Button>
 
                 <Button className="group" asChild>

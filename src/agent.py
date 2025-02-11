@@ -435,6 +435,10 @@ async def execute_workflow(description: str):
                         config = prepare_component_config(split_components)
                         tg.create_task(development_agent(config, claude_config))
                         work_queue.extend(split_components["parts"])
+                    else:
+                        # Ready to write - send to development
+                        config = prepare_component_config(component)
+                        tg.create_task(development_agent(config, claude_config))
 
         logger.info("Workflow: Execution completed successfully")
         

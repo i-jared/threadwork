@@ -94,8 +94,8 @@ async def splitting_agent(input: dict, config: dict) -> SplitComponentDict:
     input = validate_component_dict(input, "Splitting Agent (input)")
     
     logger.info("Splitting Agent: Starting splitting process.")
-    prompt = f"""Split the following {input['type']} description into smaller chunks, preserving the original name and type.
-    Each part should be a single component or a single part of a component.
+    prompt = f"""Split the following {input['type']} app UI description into smaller UI chunks. Only include UI elements.
+    Each part should be a single component or a single page.
 
     ```
     {input['description']}
@@ -110,7 +110,7 @@ async def splitting_agent(input: dict, config: dict) -> SplitComponentDict:
             \'{{'
                 "name": "generated name of the described part",
                 "description": "generated description of the part",
-                "type": "type of the part, either 'component' or 'page'"
+                "type": "type of the part, MUST BE EITHER 'component' or 'page'"
             \'}}'
         ]
     \'}}'
@@ -136,7 +136,8 @@ async def planning_agent(input: str, config: dict) -> ComponentDict:
     Creates a structured project plan from the idea.
     """
     logger.info("Planning Agent: Starting planning process.")
-    prompt = f"""Create a detailed description for the following app. Focus on the UI and UX.
+    prompt = f"""Create a detailed description for the UI of the following app. Only include UI elements and pages in a 
+    high level overview.
     
     ```
     {input}
@@ -145,8 +146,8 @@ async def planning_agent(input: str, config: dict) -> ComponentDict:
     Output the plan and first file details in the following JSON format:
     {{
         "description": "detailed plan here",
-        "name": "name of first file to create",
-        "path": "path to first file",
+        "name": "name of root file of the project",
+        "path": "typical path to root file of the project",
         "type": "page"
     }}"""
     try:
@@ -247,7 +248,7 @@ async def expounding_agent(input: dict, config: dict) -> ComponentDict:
     Expounding Agent:
     Given a component/page dictionary with name, type and description,
     increase the detail and resolution of the description while preserving
-    the original name and type.
+    the original name and type. 
 
     Input format: ComponentDict
     Output format: ComponentDict
@@ -257,7 +258,7 @@ async def expounding_agent(input: dict, config: dict) -> ComponentDict:
     
     logger.info("Expounding Agent: Starting expounding process.")
     prompt = f"""Given the following component/page description, increase the detail and resolution of the description.
-    Preserve the original name and type.
+    Preserve the original name and type. Only include UI elements. Focus solely on the UI.
     Return the result in the following format, with absolutely no other text or characters:
 
     \'{{'
@@ -386,6 +387,7 @@ async def execute_workflow(description: str):
         components = await splitting_agent(plan, gemini_config)
         
         # Prepare initial config and develop main component
+        components["description"] = plan["description"]
         config = prepare_component_config(components)
         development_agent(config, claude_config)
 
@@ -407,6 +409,7 @@ async def execute_workflow(description: str):
                         expanded = await expounding_agent(component, gemini_config)
                         split_components = await splitting_agent(expanded, gemini_config)
                         
+                        split_components["description"] = expanded["description"]
                         config = prepare_component_config(split_components)
                         tg.create_task(development_agent(config, claude_config))
                         work_queue.extend(split_components["parts"])
@@ -415,6 +418,7 @@ async def execute_workflow(description: str):
                         # Need to split - send to splitting
                         split_components = await splitting_agent(component, gemini_config)
                         
+                        split_components["description"] = component["description"]
                         config = prepare_component_config(split_components)
                         tg.create_task(development_agent(config, claude_config))
                         work_queue.extend(split_components["parts"])

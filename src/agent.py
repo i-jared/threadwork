@@ -96,6 +96,7 @@ async def splitting_agent(input: dict, config: dict) -> SplitComponentDict:
     logger.info("Splitting Agent: Starting splitting process.")
     prompt = f"""Split the following {input['type']} app UI description into smaller UI chunks. Only include UI elements.
     Each part should be a single component or a single page.
+    Give each part a short summary (less than 20 words) that clearly states its purpose.
 
     ```
     {input['description']}
@@ -109,7 +110,8 @@ async def splitting_agent(input: dict, config: dict) -> SplitComponentDict:
         "parts": [
             \'{{'
                 "name": "generated name of the described part (eg. login.tsx, big_button.py, etc.)",
-                "description": "generated description of the part",
+                "description": "detailed technical description of implementation",
+                "summary": "short description of the part (<20 words)",
                 "type": "type of the part, MUST BE EITHER 'component' or 'page'"
             \'}}'
         ]
@@ -199,6 +201,12 @@ async def development_agent(input: dict, config: dict) -> bool:
     
     logger.info("Development Agent: Starting development process.")
 
+    # Get component descriptions if they exist
+    component_descriptions = []
+    if hasattr(input, "parts"):
+        for part in input["parts"]:
+            component_descriptions.append(f"{part['path']}: {part['summary']}")
+
     prompt = f"""
     Write the code for the following page or component:
     
@@ -206,21 +214,26 @@ async def development_agent(input: dict, config: dict) -> bool:
     {input["description"]}
     ```
 
-    { 
-    'These are components for you to use, if any: ' + ', '.join(input["components"]) if input["components"] else ''
+    {
+    'Available components and their purposes:\n' + '\n'.join(component_descriptions) if component_descriptions else 
+    ('These are components for you to use, if any: ' + ', '.join(input["components"]) if input["components"] else '')
     }
 
     Output just the code, nothing else.
     """
-
 
     try:
         api_output = await make_api_call(prompt, config)
         logger.info(f"Development Agent: Successfully generated code")
         
         code = api_output["content"]
-
-
+        
+        # Extract code from possible markdown code block
+        if code.startswith("```"):
+            lines = code.split("\n")
+            # Remove first line (```language) and last line (```)
+            code = "\n".join(lines[1:-1])
+        
         # Get the file content from the response
         file_info = input.get("path", {})
         if not file_info:

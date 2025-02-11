@@ -12,12 +12,11 @@ import {
 import {
   NavigationMenu,
   NavigationMenuItem,
-  NavigationMenuLink,
   NavigationMenuList,
   navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { CreditCard, Home, LogOut, User, FolderOpen } from "lucide-react"
+import { CreditCard, Home, LogOut, FolderOpen } from "lucide-react"
 
 export function Navbar() {
   const { user, signOut } = useAuth()
@@ -31,7 +30,7 @@ export function Navbar() {
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
         <div className="flex items-center space-x-8">
           <Link to="/" className="font-semibold text-lg">
-            Project Manager
+            Threadwork
           </Link>
 
           {user && (

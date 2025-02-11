@@ -15,24 +15,24 @@
 
 ## 3. Create Page Structure
 ### Login/Register Page
-- [ ] Implement Supabase auth with supabase-js
-- [ ] Set up auth.uid() storage in Supabase records
+- [X] Implement Supabase auth with supabase-js
+- [X] Set up auth.uid() storage in Supabase records
 - [X] Create minimal login form
-- [ ] Add registration option
+- [X] Add registration option
 
 ### Chat Input Page
 - [X] Create app description input form
-- [ ] Implement credit check before submission
-- [ ] Add redirect to billing if credits insufficient
-- [ ] Implement submission handler
+- [X] Implement credit check before submission
+- [X] Add redirect to billing if credits insufficient
+- [X] Implement submission handler
 
 ### Loading Screen
-- [X] Create loading indicator component
+- [ ] Create loading indicator component
 - [ ] Add progress feedback if possible
 
 ### Success Page
 - [X] Display completion message
-- [X] Show S3 download link
+- [X] Show project download link
 - [X] Add option to start new project
 
 ## 4. Backend API Integration
@@ -40,7 +40,7 @@
 - [X] Implement POST /create-project endpoint
 - [X] Implement GET /check-credits endpoint
 - [X] Implement POST /stripe-webhook endpoint
-- [ ] Add S3 upload functionality to workflow
+- [ ] Add supabase upload functionality to workflow
 - [ ] Update existing agent.py imports
 
 ## 5. Supabase Setup
@@ -55,7 +55,7 @@
 
 ## 6. Stripe Integration
 - [ ] Set up Stripe account and API keys
-- [ ] Create billing UI components
+- [X] Create billing UI components
 - [ ] Implement Stripe Checkout flow
 - [ ] Set up webhook endpoint
 - [ ] Add credit balance updates on payment
@@ -96,10 +96,10 @@
 - [ ] Verify credit system
 
 ## Future Enhancements
-- [ ] User dashboard
-- [ ] Project history
-- [ ] Credit usage analytics
-- [ ] Enhanced progress feedback
+- [X] User dashboard
+- [X] Project history
+- [X] Credit usage analytics
+- [X] Enhanced progress feedback
 - [ ] Bulk project generation
 
 ## Notes

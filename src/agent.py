@@ -108,7 +108,7 @@ async def splitting_agent(input: dict, config: dict) -> SplitComponentDict:
         "type": "{input['type']}",
         "parts": [
             \'{{'
-                "name": "generated name of the described part",
+                "name": "generated name of the described part (eg. login.tsx, big_button.py, etc.)",
                 "description": "generated description of the part",
                 "type": "type of the part, MUST BE EITHER 'component' or 'page'"
             \'}}'
@@ -143,7 +143,7 @@ async def planning_agent(input: str, config: dict) -> ComponentDict:
     {input}
     ```
 
-    Output the plan and first file details in the following JSON format:
+    Your output MUST be valid json.Output the plan and first file details in the following JSON format:
     {{
         "description": "detailed plan here",
         "name": "name of root file of the project",
@@ -368,7 +368,7 @@ async def execute_workflow(description: str):
     claude_config = {
         "provider": "anthropic",
         "api_key": os.getenv('ANTHROPIC_API_KEY'),
-        "max_tokens": 10240,
+        "max_tokens": 8192,
         "model": "claude-3-5-sonnet-20241022"
     }
 

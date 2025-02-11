@@ -2,3 +2,4 @@
 .cursorrules
 __pycache__/
 logs/
+tmp/

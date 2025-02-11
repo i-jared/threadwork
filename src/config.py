@@ -95,18 +95,18 @@ def get_openai_config(api_key: str, prompt: str, max_tokens: int = 1024, model: 
 def get_deepseek_config(api_key: str, prompt: str, max_tokens: int = 1024, model: str = "deepseek-chat"):
     return {
         "api_endpoint": "https://api.deepseek.com/chat/completions",
-        "body": {
+        "headers": {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        },
+        "body": json.dumps({
             "model": model,
             "messages": [
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": prompt}
             ],
             "stream": False
-        },
-        "headers": {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
+        })
     }
 
 def extract_api_response(response: dict, provider: str):

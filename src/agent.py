@@ -149,8 +149,8 @@ async def planning_agent(input: str, config: dict, session: aiohttp.ClientSessio
     Your output MUST be valid json.Output the plan and first file details in the following JSON format:
     {{
         "description": "detailed plan here",
-        "name": "name of root file of the project",
-        "path": "typical path to root file of the project",
+        "name": "name of main file of the project",
+        "path": "typical path to main file of the project",
         "type": "page"
     }}"""
     try:
@@ -397,13 +397,22 @@ async def execute_workflow(description: str):
         "provider": "gemini",
         "api_key": os.getenv('GEMINI_API_KEY'),
         "max_tokens": 100000,
-        "model": "gemini-2.0-flash"
+        "model": "gemini-1.5-flash"
     }
+
+    deepseek_config = {
+        "provider": "deepseek",
+        "api_key": os.getenv('DEEPSEEK_API_KEY'),
+        "max_tokens": 10000,
+        "model": "deepseek-reasoner"
+    }
+
+    default_config = deepseek_config
     
     try:
         async with aiohttp.ClientSession() as session:
             # Initial planning
-            plan = await planning_agent(description, gemini_config, session)
+            plan = await planning_agent(description, default_config, session)
 
             # Initial splitting
             components = await splitting_agent(plan, gemini_config, session)
@@ -413,7 +422,7 @@ async def execute_workflow(description: str):
             config = prepare_component_config(components)
             config["path"] = 'tmp/' + components["name"]
     
-            asyncio.create_task(development_agent(config, gemini_config, session))
+            asyncio.create_task(development_agent(config, claude_config, session))
     
             # Process queue for components that need work
             work_queue = components["parts"]
@@ -435,7 +444,7 @@ async def execute_workflow(description: str):
                             
                             split_components["description"] = expanded["description"]
                             config = prepare_component_config(split_components)
-                            tg.create_task(development_agent(config, gemini_config, session))
+                            tg.create_task(development_agent(config, claude_config, session))
                             work_queue.extend(split_components["parts"])
                                 
                         elif route == "split":
@@ -444,12 +453,12 @@ async def execute_workflow(description: str):
                             
                             split_components["description"] = component["description"]
                             config = prepare_component_config(split_components)
-                            tg.create_task(development_agent(config, gemini_config, session))
+                            tg.create_task(development_agent(config, claude_config, session))
                             work_queue.extend(split_components["parts"])
                         else:
                             # Ready to write - send to development
                             config = prepare_component_config(component)
-                            tg.create_task(development_agent(config, gemini_config, session))
+                            tg.create_task(development_agent(config, claude_config, session))
     
         logger.info("Workflow: Execution completed successfully")
         
@@ -464,6 +473,6 @@ async def execute_workflow(description: str):
 
 if __name__ == '__main__':
     # Example project specification
-    project_description = "A chat site without any authentication: just a chat interface. text input, see other people's messages, etc."
+    project_description = "A chat site without any authentication: just a chat interface. text input, see other people's messages, etc. Build it in React with typescript. main file should be App.tsx."
     
     asyncio.run(execute_workflow(project_description))

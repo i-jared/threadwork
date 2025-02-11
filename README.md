@@ -71,3 +71,8 @@ print("Hello, world!")
 
 Created by Jared Lambert.
 
+
+# TODO:
+- [ ] copy the files to storage in supabase storage. create a router that will be able to render those apps.
+- [ ] pass in project details and docs to every request 
+- [ ] handle errors: 429, json parsing

@@ -30,6 +30,7 @@ async def make_api_call(prompt: str, api_config: dict) -> dict:
     config = build_api_request(prompt, api_config)
     
     langfuse_context.update_current_observation(
+      name=api_config["fx"],
       input=prompt,
       model=api_config["model"],
       metadata={
@@ -118,6 +119,7 @@ async def splitting_agent(input: dict, config: dict) -> SplitComponentDict:
     \'}}'
     """
     try:
+        config["fx"] = "splitting"
         api_output = await make_api_call(prompt, config)
         logger.info("Splitting Agent: Successfully split project")
         
@@ -153,6 +155,7 @@ async def planning_agent(input: str, config: dict) -> ComponentDict:
         "type": "page"
     }}"""
     try:
+        config["fx"] = "planning"
         api_output = await make_api_call(prompt, config)
         logger.info("Planning Agent: Successfully received API response")
         logger.debug(f"Planning Agent: Raw response: {api_output}")
@@ -203,7 +206,7 @@ async def development_agent(input: dict, config: dict) -> bool:
 
     # Get component descriptions if they exist
     component_descriptions = []
-    if hasattr(input, "parts"):
+    if "parts" in input:
         for part in input["parts"]:
             component_descriptions.append(f"{part['path']}: {part['summary']}")
 
@@ -223,6 +226,7 @@ async def development_agent(input: dict, config: dict) -> bool:
     """
 
     try:
+        config["fx"] = "development"
         api_output = await make_api_call(prompt, config)
         logger.info(f"Development Agent: Successfully generated code")
         
@@ -288,8 +292,8 @@ async def expounding_agent(input: dict, config: dict) -> ComponentDict:
 
     Output just the JSON object, nothing else.
     """
-
     try:
+        config["fx"] = "expounding"
         api_output = await make_api_call(prompt, config)
         logger.debug("Expounding Agent: Generated expanded spec")
 
@@ -323,6 +327,7 @@ async def routing_agent(input: str, config: dict) -> str:
     """
 
     try:
+        config["fx"] = "routing"
         api_output = await make_api_call(prompt, config)
         logger.info("Routing Agent: Successfully determined route")
         
@@ -381,11 +386,6 @@ async def execute_workflow(description: str):
        - Expounding (if needed) -> Splitting
        - Splitting (if needed)
     """
-    # langfuse = Langfuse(
-    #     public_key=os.getenv('LANGFUSE_PUBLIC_KEY'),
-    #     secret_key=os.getenv('LANGFUSE_SECRET_KEY'),
-    #     host=os.getenv('LANGFUSE_HOST')
-    # )
     
     claude_config = {
         "provider": "anthropic",
@@ -412,7 +412,8 @@ async def execute_workflow(description: str):
         components["description"] = plan["description"]
         config = prepare_component_config(components)
         config["path"] = 'tmp/' + components["name"]
-        await development_agent(config, gemini_config)
+
+        asyncio.create_task(development_agent(config, gemini_config))
 
         # Process queue for components that need work
         work_queue = components["parts"]
@@ -434,7 +435,7 @@ async def execute_workflow(description: str):
                         
                         split_components["description"] = expanded["description"]
                         config = prepare_component_config(split_components)
-                        tg.create_task(development_agent(config, claude_config))
+                        tg.create_task(development_agent(config, gemini_config))
                         work_queue.extend(split_components["parts"])
                             
                     elif route == "split":
@@ -443,12 +444,12 @@ async def execute_workflow(description: str):
                         
                         split_components["description"] = component["description"]
                         config = prepare_component_config(split_components)
-                        tg.create_task(development_agent(config, claude_config))
+                        tg.create_task(development_agent(config, gemini_config))
                         work_queue.extend(split_components["parts"])
                     else:
                         # Ready to write - send to development
                         config = prepare_component_config(component)
-                        tg.create_task(development_agent(config, claude_config))
+                        tg.create_task(development_agent(config, gemini_config))
 
         logger.info("Workflow: Execution completed successfully")
         

@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # -------------------------
 
 @observe(as_type="generation")
-async def make_api_call(prompt: str, api_config: dict) -> dict:
+async def make_api_call(prompt: str, api_config: dict, session: aiohttp.ClientSession) -> dict:
     """
     Makes an API call to the given endpoint with the given headers and body.
     """
@@ -37,53 +37,52 @@ async def make_api_call(prompt: str, api_config: dict) -> dict:
           "provider": api_config["provider"]
       }
     )
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(config["api_endpoint"], 
-                                  headers=config["headers"], 
-                                  data=config["body"]) as response:
-                response_text = await response.text()
+    try:
+        async with session.post(config["api_endpoint"], 
+                              headers=config["headers"], 
+                              data=config["body"]) as response:
+            response_text = await response.text()
                 
-                if response.status != 200:
-                    error_msg = f"API request failed with status {response.status}: {response_text}"
-                    logger.error(error_msg)
-                    logger.debug(f"Request details: endpoint={config['api_endpoint']}, headers={config['headers']}")
-                    raise Exception(error_msg)
-                
-                try:
-                    result = json.loads(response_text)
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to parse response as JSON: {response_text}")
-                    raise
-                
-                logger.debug(f"API Response: {result}")
-                api_output = extract_api_response(result, api_config["provider"])
+            if response.status != 200:
+                error_msg = f"API request failed with status {response.status}: {response_text}"
+                logger.error(error_msg)
+                logger.debug(f"Request details: endpoint={config['api_endpoint']}, headers={config['headers']}")
+                raise Exception(error_msg)
+            
+            try:
+                result = json.loads(response_text)
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse response as JSON: {response_text}")
+                raise
+            
+            logger.debug(f"API Response: {result}")
+            api_output = extract_api_response(result, api_config["provider"])
 
-                # Update with generation details
-                langfuse_context.update_current_observation(
-                    usage_details={
-                        "input": api_output["usage"]["input_tokens"],
-                        "output": api_output["usage"]["output_tokens"]
-                    }
-                )
-                return api_output
-                
-        except aiohttp.ClientError as e:
-            error_msg = f"Network error during API call: {str(e)}"
-            logger.error(error_msg)
-            logger.debug(f"Request details: endpoint={config['api_endpoint']}, headers={config['headers']}")
-            raise Exception(error_msg) from e
-        except json.JSONDecodeError as e:
-            error_msg = f"Failed to parse API response as JSON: {str(e)}\nResponse text: {response_text}"
-            logger.error(error_msg)
-            raise Exception(error_msg) from e
-        except Exception as e:
-            error_msg = f"Unexpected error during API call: {str(e)}"
-            logger.error(error_msg)
-            raise Exception(error_msg) from e
+            # Update with generation details
+            langfuse_context.update_current_observation(
+                usage_details={
+                    "input": api_output["usage"]["input_tokens"],
+                    "output": api_output["usage"]["output_tokens"]
+                }
+            )
+            return api_output
+            
+    except aiohttp.ClientError as e:
+        error_msg = f"Network error during API call: {str(e)}"
+        logger.error(error_msg)
+        logger.debug(f"Request details: endpoint={config['api_endpoint']}, headers={config['headers']}")
+        raise Exception(error_msg) from e
+    except json.JSONDecodeError as e:
+        error_msg = f"Failed to parse API response as JSON: {str(e)}\nResponse text: {response_text}"
+        logger.error(error_msg)
+        raise Exception(error_msg) from e
+    except Exception as e:
+        error_msg = f"Unexpected error during API call: {str(e)}"
+        logger.error(error_msg)
+        raise Exception(error_msg) from e
 
 
-async def splitting_agent(input: dict, config: dict) -> SplitComponentDict:
+async def splitting_agent(input: dict, config: dict, session: aiohttp.ClientSession) -> SplitComponentDict:
     """
     Splitting Agent:
     Splits the component/page description into smaller chunks.
@@ -120,7 +119,7 @@ async def splitting_agent(input: dict, config: dict) -> SplitComponentDict:
     """
     try:
         config["fx"] = "splitting"
-        api_output = await make_api_call(prompt, config)
+        api_output = await make_api_call(prompt, config, session)
         logger.info("Splitting Agent: Successfully split project")
         
         result = parse_json_response(api_output["content"])
@@ -134,7 +133,7 @@ async def splitting_agent(input: dict, config: dict) -> SplitComponentDict:
         raise
 
 
-async def planning_agent(input: str, config: dict) -> ComponentDict:
+async def planning_agent(input: str, config: dict, session: aiohttp.ClientSession) -> ComponentDict:
     """
     Planning Agent:
     Creates a structured project plan from the idea.
@@ -156,7 +155,7 @@ async def planning_agent(input: str, config: dict) -> ComponentDict:
     }}"""
     try:
         config["fx"] = "planning"
-        api_output = await make_api_call(prompt, config)
+        api_output = await make_api_call(prompt, config, session)
         logger.info("Planning Agent: Successfully received API response")
         logger.debug(f"Planning Agent: Raw response: {api_output}")
         
@@ -189,7 +188,7 @@ async def planning_agent(input: str, config: dict) -> ComponentDict:
         raise
 
 
-async def development_agent(input: dict, config: dict) -> bool:
+async def development_agent(input: dict, config: dict, session: aiohttp.ClientSession) -> bool:
     """
     Development Agent:
     Produces code files based on the provided description and name.
@@ -227,7 +226,7 @@ async def development_agent(input: dict, config: dict) -> bool:
 
     try:
         config["fx"] = "development"
-        api_output = await make_api_call(prompt, config)
+        api_output = await make_api_call(prompt, config, session)
         logger.info(f"Development Agent: Successfully generated code")
         
         code = api_output["content"]
@@ -260,7 +259,7 @@ async def development_agent(input: dict, config: dict) -> bool:
         logger.debug(f"Detailed error: {str(e)}")
         raise
 
-async def expounding_agent(input: dict, config: dict) -> ComponentDict:
+async def expounding_agent(input: dict, config: dict, session: aiohttp.ClientSession) -> ComponentDict:
     """
     Expounding Agent:
     Given a component/page dictionary with name, type and description,
@@ -294,7 +293,7 @@ async def expounding_agent(input: dict, config: dict) -> ComponentDict:
     """
     try:
         config["fx"] = "expounding"
-        api_output = await make_api_call(prompt, config)
+        api_output = await make_api_call(prompt, config, session)
         logger.debug("Expounding Agent: Generated expanded spec")
 
         result = parse_json_response(api_output["content"])
@@ -305,7 +304,7 @@ async def expounding_agent(input: dict, config: dict) -> ComponentDict:
         logger.debug(f"Detailed error: {str(e)}")
         raise
 
-async def routing_agent(input: str, config: dict) -> str:
+async def routing_agent(input: str, config: dict, session: aiohttp.ClientSession) -> str:
     """
     Routing Agent:
     Analyzes input and determines whether it needs more detail, should be split up,
@@ -328,7 +327,7 @@ async def routing_agent(input: str, config: dict) -> str:
 
     try:
         config["fx"] = "routing"
-        api_output = await make_api_call(prompt, config)
+        api_output = await make_api_call(prompt, config, session)
         logger.info("Routing Agent: Successfully determined route")
         
         route = api_output["content"].strip().lower()
@@ -402,55 +401,56 @@ async def execute_workflow(description: str):
     }
     
     try:
-        # Initial planning
-        plan = await planning_agent(description, gemini_config)
+        async with aiohttp.ClientSession() as session:
+            # Initial planning
+            plan = await planning_agent(description, gemini_config, session)
 
-        # Initial splitting
-        components = await splitting_agent(plan, gemini_config)
-        
-        # Prepare initial config and develop main component
-        components["description"] = plan["description"]
-        config = prepare_component_config(components)
-        config["path"] = 'tmp/' + components["name"]
-
-        asyncio.create_task(development_agent(config, gemini_config))
-
-        # Process queue for components that need work
-        work_queue = components["parts"]
-        
-        while work_queue:
-            current_batch = work_queue.copy()
-            work_queue.clear()
+            # Initial splitting
+            components = await splitting_agent(plan, gemini_config, session)
             
-            # Process all current components concurrently
-            async with asyncio.TaskGroup() as tg:
-                for component in current_batch:
-                    # Determine next steps
-                    route = await routing_agent(component["description"], gemini_config)
-                    
-                    if route == "detail":
-                        # Need more detail - send to expounding then splitting
-                        expanded = await expounding_agent(component, gemini_config)
-                        split_components = await splitting_agent(expanded, gemini_config)
+            # Prepare initial config and develop main component
+            components["description"] = plan["description"]
+            config = prepare_component_config(components)
+            config["path"] = 'tmp/' + components["name"]
+    
+            asyncio.create_task(development_agent(config, gemini_config, session))
+    
+            # Process queue for components that need work
+            work_queue = components["parts"]
+            
+            while work_queue:
+                current_batch = work_queue.copy()
+                work_queue.clear()
+                
+                # Process all current components concurrently
+                async with asyncio.TaskGroup() as tg:
+                    for component in current_batch:
+                        # Determine next steps
+                        route = await routing_agent(component["description"], gemini_config, session)
                         
-                        split_components["description"] = expanded["description"]
-                        config = prepare_component_config(split_components)
-                        tg.create_task(development_agent(config, gemini_config))
-                        work_queue.extend(split_components["parts"])
+                        if route == "detail":
+                            # Need more detail - send to expounding then splitting
+                            expanded = await expounding_agent(component, gemini_config, session)
+                            split_components = await splitting_agent(expanded, gemini_config, session)
                             
-                    elif route == "split":
-                        # Need to split - send to splitting
-                        split_components = await splitting_agent(component, gemini_config)
-                        
-                        split_components["description"] = component["description"]
-                        config = prepare_component_config(split_components)
-                        tg.create_task(development_agent(config, gemini_config))
-                        work_queue.extend(split_components["parts"])
-                    else:
-                        # Ready to write - send to development
-                        config = prepare_component_config(component)
-                        tg.create_task(development_agent(config, gemini_config))
-
+                            split_components["description"] = expanded["description"]
+                            config = prepare_component_config(split_components)
+                            tg.create_task(development_agent(config, gemini_config))
+                            work_queue.extend(split_components["parts"])
+                                
+                        elif route == "split":
+                            # Need to split - send to splitting
+                            split_components = await splitting_agent(component, gemini_config, session)
+                            
+                            split_components["description"] = component["description"]
+                            config = prepare_component_config(split_components)
+                            tg.create_task(development_agent(config, gemini_config, session))
+                            work_queue.extend(split_components["parts"])
+                        else:
+                            # Ready to write - send to development
+                            config = prepare_component_config(component)
+                            tg.create_task(development_agent(config, gemini_config, session))
+    
         logger.info("Workflow: Execution completed successfully")
         
     except Exception as e:

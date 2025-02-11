@@ -216,7 +216,7 @@ async def development_agent(input: dict, config: dict) -> bool:
 
     {
     'Available components and their purposes:\n' + '\n'.join(component_descriptions) if component_descriptions else 
-    ('These are components for you to use, if any: ' + ', '.join(input["components"]) if input["components"] else '')
+    ''
     }
 
     Output just the code, nothing else.
@@ -346,17 +346,23 @@ def prepare_component_config(components: dict) -> dict:
     config = {
         "name": components["name"],
         "type": components["type"],
-        "description": components["description"],
-        "path": 'tmp/pages/' + components["name"] if components["type"] == "page" else 'tmp/components/' + components["name"]
+        "description": components["description"]
     }
+
+    # Only set path if not already present
+    if "path" not in components:
+        config["path"] = 'tmp/pages/' + components["name"] if components["type"] == "page" else 'tmp/components/' + components["name"]
+    else:
+        config["path"] = components["path"]
 
     # Only add components key if parts exist
     if "parts" in components:
-        # Set paths for all components
+        # Set paths for components that don't have them
         for component in components["parts"]:
-            component["path"] = 'tmp/pages/' + component["name"] if component["type"] == "page" else 'tmp/components/' + component["name"]
+            if "path" not in component:
+                component["path"] = 'tmp/pages/' + component["name"] if component["type"] == "page" else 'tmp/components/' + component["name"]
         
-        config["parts"] = [{"path": component["path"], "summary": component["summary"], } for component in components["parts"]]
+        config["parts"] = [{"path": component["path"], "summary": component["summary"]} for component in components["parts"]]
 
     return config
 # -------------------------
@@ -405,7 +411,8 @@ async def execute_workflow(description: str):
         # Prepare initial config and develop main component
         components["description"] = plan["description"]
         config = prepare_component_config(components)
-        development_agent(config, claude_config)
+        config["path"] = 'tmp/' + components["name"]
+        await development_agent(config, gemini_config)
 
         # Process queue for components that need work
         work_queue = components["parts"]
@@ -456,6 +463,6 @@ async def execute_workflow(description: str):
 
 if __name__ == '__main__':
     # Example project specification
-    project_description = "A chatbot that can answer questions and help with tasks written in react and typescript."
+    project_description = "A chat site without any authentication: just a chat interface. text input, see other people's messages, etc."
     
     asyncio.run(execute_workflow(project_description))

@@ -3,10 +3,10 @@ import aiohttp
 import logging
 import os
 import json
-from langfuse import Langfuse
+from langfuse.decorators import langfuse_context, observe
 from dotenv import load_dotenv
 from config import build_api_request, extract_api_response
-from file import write_file
+from file import write_file, parse_json_response
 from logging_config import setup_logging
 from type import ComponentDict, SplitComponentDict, validate_component_dict, validate_split_output
 
@@ -22,10 +22,20 @@ logger = logging.getLogger(__name__)
 # Agent Definitions
 # -------------------------
 
-async def make_api_call(config: dict, span) -> dict:
+@observe(as_type="generation")
+async def make_api_call(prompt: str, api_config: dict) -> dict:
     """
     Makes an API call to the given endpoint with the given headers and body.
     """
+    config = build_api_request(prompt, api_config)
+    
+    langfuse_context.update_current_observation(
+      input=prompt,
+      model=api_config["model"],
+      metadata={
+          "provider": api_config["provider"]
+      }
+    )
     async with aiohttp.ClientSession() as session:
         try:
             async with session.post(config["api_endpoint"], 
@@ -45,21 +55,17 @@ async def make_api_call(config: dict, span) -> dict:
                     logger.error(f"Failed to parse response as JSON: {response_text}")
                     raise
                 
-                # Update the span with generation details
-                span.update(
-                    name=f"{config['provider']}-generation",
-                    input=json.loads(config["body"]),  # Parse the JSON string back to dict
-                    output=result,
-                    metadata={
-                        "endpoint": config["api_endpoint"],
-                        "status": response.status,
-                        "model": config["model"],
-                        "provider": config["provider"]
+                logger.debug(f"API Response: {result}")
+                api_output = extract_api_response(result, api_config["provider"])
+
+                # Update with generation details
+                langfuse_context.update_current_observation(
+                    usage_details={
+                        "input": api_output["usage"]["input_tokens"],
+                        "output": api_output["usage"]["output_tokens"]
                     }
                 )
-                
-                logger.debug(f"API Response: {result}")
-                return result
+                return api_output
                 
         except aiohttp.ClientError as e:
             error_msg = f"Network error during API call: {str(e)}"
@@ -76,7 +82,7 @@ async def make_api_call(config: dict, span) -> dict:
             raise Exception(error_msg) from e
 
 
-async def splitting_agent(input: dict, config: dict, span) -> SplitComponentDict:
+async def splitting_agent(input: dict, config: dict) -> SplitComponentDict:
     """
     Splitting Agent:
     Splits the component/page description into smaller chunks.
@@ -91,11 +97,11 @@ async def splitting_agent(input: dict, config: dict, span) -> SplitComponentDict
     prompt = f"""Split the following {input['type']} description into smaller chunks, preserving the original name and type.
     Each part should be a single component or a single part of a component.
 
-    <start description>
+    ```
     {input['description']}
-    <end description>
+    ```
 
-    The format should be as follows, with absolutely no other text or characters.
+    The format should be json structured as follows, with absolutely no other text or characters.
 
     \'{{'
         "name": "{input['name']}",
@@ -110,51 +116,25 @@ async def splitting_agent(input: dict, config: dict, span) -> SplitComponentDict
     \'}}'
     """
     try:
-        api_config = build_api_request(prompt, config)
-        
-        # Add metadata about the request
-        span.set_metadata({
-            "agent": "splitting",
-            "input": input,
-            "prompt": prompt,
-            "config": {
-                "provider": config["provider"],
-                "model": config["model"]
-            }
-        })
-        
-        response = await make_api_call(api_config, span)
+        api_output = await make_api_call(prompt, config)
         logger.info("Splitting Agent: Successfully split project")
-        api_output = extract_api_response(response, config["provider"])
         
-        result = json.loads(api_output["content"])
+        result = parse_json_response(api_output["content"])
         validated_result = validate_split_output(result, "Splitting Agent")
-        
-        # Add result metadata
-        span.set_metadata({
-            "output": validated_result,
-            "tokens": api_output["usage"]
-        })
         
         return validated_result
 
     except Exception as e:
-        span.set_metadata({
-            "error": str(e),
-            "error_type": type(e).__name__
-        })
         logger.error("Splitting Agent: Error encountered")
         logger.debug(f"Detailed error: {str(e)}")
         raise
 
 
-async def planning_agent(input: str, config: dict, span) -> ComponentDict:
+async def planning_agent(input: str, config: dict) -> ComponentDict:
     """
     Planning Agent:
     Creates a structured project plan from the idea.
     """
-    # Validate input
-    
     logger.info("Planning Agent: Starting planning process.")
     prompt = f"""Create a detailed description for the following app. Focus on the UI and UX.
     
@@ -166,25 +146,44 @@ async def planning_agent(input: str, config: dict, span) -> ComponentDict:
     {{
         "description": "detailed plan here",
         "name": "name of first file to create",
-        "path": "path to first file"
+        "path": "path to first file",
+        "type": "page"
     }}"""
     try:
-        api_config = build_api_request(prompt, config)
-        logger.info(f"Planning Agent: API Config: {api_config}")
-        response = await make_api_call(api_config, span)
-        logger.info(f"Planning Agent: Successfully generated plan")
-        api_output = extract_api_response(response, config["provider"])
+        api_output = await make_api_call(prompt, config)
+        logger.info("Planning Agent: Successfully received API response")
+        logger.debug(f"Planning Agent: Raw response: {api_output}")
         
-        result = json.loads(api_output["content"])
-        return validate_component_dict(result, "Planning Agent")
+        logger.debug(f"Planning Agent: Extracted output: {api_output}")
         
+        try:
+            if not api_output.get("content"):
+                raise ValueError("No content in API output")
+                
+            result = parse_json_response(api_output["content"])
+            logger.debug(f"Planning Agent: Parsed result: {result}")
+            
+            validated_result = validate_component_dict(result, "Planning Agent")
+            logger.info("Planning Agent: Successfully validated result")
+            
+            return validated_result
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Planning Agent: Failed to parse JSON content: {api_output.get('content')}")
+            logger.debug(f"JSON Error: {str(e)}")
+            raise ValueError(f"Invalid JSON in API response: {str(e)}") from e
+        except Exception as e:
+            logger.error(f"Planning Agent: Error processing API output: {str(e)}")
+            logger.debug(f"API Output: {api_output}")
+            raise
+            
     except Exception as e:
         logger.error("Planning Agent: Error encountered")
         logger.debug(f"Detailed error: {str(e)}")
         raise
 
 
-async def development_agent(input: dict, config: dict, span) -> bool:
+async def development_agent(input: dict, config: dict) -> bool:
     """
     Development Agent:
     Produces code files based on the provided description and name.
@@ -202,19 +201,21 @@ async def development_agent(input: dict, config: dict, span) -> bool:
     prompt = f"""
     Write the code for the following page or component:
     
-    <start description>
+    ```
     {input["description"]}
-    <end description>
+    ```
+
+    { 
+    'These are components for you to use, if any: ' + ', '.join(input["components"]) if input["components"] else ''
+    }
 
     Output just the code, nothing else.
     """
 
 
     try:
-        api_config = build_api_request(prompt, config)
-        response = await make_api_call(api_config, span)
+        api_output = await make_api_call(prompt, config)
         logger.info(f"Development Agent: Successfully generated code")
-        api_output = extract_api_response(response, config["provider"])
         
         code = api_output["content"]
 
@@ -241,7 +242,7 @@ async def development_agent(input: dict, config: dict, span) -> bool:
         logger.debug(f"Detailed error: {str(e)}")
         raise
 
-async def expounding_agent(input: dict, config: dict, span) -> ComponentDict:
+async def expounding_agent(input: dict, config: dict) -> ComponentDict:
     """
     Expounding Agent:
     Given a component/page dictionary with name, type and description,
@@ -275,14 +276,10 @@ async def expounding_agent(input: dict, config: dict, span) -> ComponentDict:
     """
 
     try:
-        api_config = build_api_request(prompt, config)
-        response = await make_api_call(api_config, span)
-
+        api_output = await make_api_call(prompt, config)
         logger.debug("Expounding Agent: Generated expanded spec")
 
-        api_output = extract_api_response(response, config["provider"])
-        
-        result = json.loads(api_output["content"])
+        result = parse_json_response(api_output["content"])
         return validate_component_dict(result, "Expounding Agent")
 
     except Exception as e:
@@ -290,7 +287,7 @@ async def expounding_agent(input: dict, config: dict, span) -> ComponentDict:
         logger.debug(f"Detailed error: {str(e)}")
         raise
 
-async def routing_agent(input: str, config: dict, span) -> str:
+async def routing_agent(input: str, config: dict) -> str:
     """
     Routing Agent:
     Analyzes input and determines whether it needs more detail, should be split up,
@@ -301,7 +298,7 @@ async def routing_agent(input: str, config: dict, span) -> str:
     logger.info("Routing Agent: Starting routing process.")
     prompt = f"""Analyze the following app segment description and determine if it:
     1. Needs more detail before it can be processed (output "detail")
-    2. Contains multiple components and should be split up (output "split")
+    2. Contains multiple components that should have their own files and should be split up (output "split")
     3. Has enough detail and is focused enough to be written to one file (output "write")
 
     <start description>
@@ -312,10 +309,8 @@ async def routing_agent(input: str, config: dict, span) -> str:
     """
 
     try:
-        api_config = build_api_request(prompt, config)
-        response = await make_api_call(api_config, span)
+        api_output = await make_api_call(prompt, config)
         logger.info("Routing Agent: Successfully determined route")
-        api_output = extract_api_response(response, config["provider"])
         
         route = api_output["content"].strip().lower()
         
@@ -330,10 +325,28 @@ async def routing_agent(input: str, config: dict, span) -> str:
         logger.debug(f"Detailed error: {str(e)}")
         raise
 
+def prepare_component_config(components: dict) -> dict:
+    """
+    Helper function to prepare component configuration including paths and component list.
+    """
+    # Set paths for all components
+    for component in components["parts"]:
+        component["path"] = 'tmp/pages/' + component["name"] if component["type"] == "page" else 'tmp/components/' + component["name"]
+    
+    # Create config with component paths
+    return {
+        "components": [component["path"] for component in components["parts"]],
+        "name": components["name"],
+        "type": components["type"],
+        "description": components["description"],
+        "path": 'tmp/pages/' + components["name"] if components["type"] == "page" else 'tmp/components/' + components["name"]
+    }
+
 # -------------------------
 # Workflow Execution
 # -------------------------
 
+@observe()
 async def execute_workflow(description: str):
     """
     Executes the workflow with Langfuse tracing in the following pattern:
@@ -345,13 +358,12 @@ async def execute_workflow(description: str):
        - Expounding (if needed) -> Splitting
        - Splitting (if needed)
     """
-    langfuse = Langfuse(
-        public_key=os.getenv('LANGFUSE_PUBLIC_KEY'),
-        secret_key=os.getenv('LANGFUSE_SECRET_KEY'),
-        host=os.getenv('LANGFUSE_HOST')
-    )
+    # langfuse = Langfuse(
+    #     public_key=os.getenv('LANGFUSE_PUBLIC_KEY'),
+    #     secret_key=os.getenv('LANGFUSE_SECRET_KEY'),
+    #     host=os.getenv('LANGFUSE_HOST')
+    # )
     
-    trace = langfuse.trace(name="project_construction")
     claude_config = {
         "provider": "anthropic",
         "api_key": os.getenv('ANTHROPIC_API_KEY'),
@@ -368,24 +380,14 @@ async def execute_workflow(description: str):
     
     try:
         # Initial planning
-        planning_span = trace.span(name="planning")
-        try:
-            plan = await planning_agent(description, gemini_config, planning_span)
-            planning_span.set_metadata("plan", plan)
-            planning_span.end()  # End span on success
-        except Exception as e:
-            planning_span.end(status="error", statusMessage=str(e))
-            raise
+        plan = await planning_agent(description, gemini_config)
 
         # Initial splitting
-        splitting_span = trace.span(name="initial_splitting")
-        try:
-            components = await splitting_agent(plan, gemini_config, splitting_span)
-            splitting_span.set_metadata("components", components)
-            splitting_span.end()  # End span on success
-        except Exception as e:
-            splitting_span.end(status="error", statusMessage=str(e))
-            raise
+        components = await splitting_agent(plan, gemini_config)
+        
+        # Prepare initial config and develop main component
+        config = prepare_component_config(components)
+        development_agent(config, claude_config)
 
         # Process queue for components that need work
         work_queue = components["parts"]
@@ -397,68 +399,32 @@ async def execute_workflow(description: str):
             # Process all current components concurrently
             async with asyncio.TaskGroup() as tg:
                 for component in current_batch:
-                    # First try to develop the component
-                    dev_span = trace.span(name=f"development_{component['name']}")
-                    try:
-                        dev_task = tg.create_task(
-                            development_agent(component, claude_config, dev_span)
-                        )
-                        dev_span.end()  # End span after task creation
-                    except Exception as e:
-                        dev_span.end(status="error", statusMessage=str(e))
-                        raise
-                    
                     # Determine next steps
-                    routing_span = trace.span(name=f"routing_{component['name']}")
-                    try:
-                        route = await routing_agent(component["description"], gemini_config, routing_span)
-                        routing_span.set_metadata("route", route)
-                        routing_span.end()
-                    except Exception as e:
-                        routing_span.end(status="error", statusMessage=str(e))
-                        raise
+                    route = await routing_agent(component["description"], gemini_config)
                     
                     if route == "detail":
                         # Need more detail - send to expounding then splitting
-                        exp_span = trace.span(name=f"expounding_{component['name']}")
-                        try:
-                            expanded = await expounding_agent(component, gemini_config, exp_span)
-                            exp_span.end()
-                        except Exception as e:
-                            exp_span.end(status="error", statusMessage=str(e))
-                            raise
+                        expanded = await expounding_agent(component, gemini_config)
+                        split_components = await splitting_agent(expanded, gemini_config)
                         
-                        split_span = trace.span(name=f"splitting_after_expound_{component['name']}")
-                        try:
-                            split_components = await splitting_agent(expanded, gemini_config, split_span)
-                            work_queue.extend(split_components["parts"])
-                            split_span.end()
-                        except Exception as e:
-                            split_span.end(status="error", statusMessage=str(e))
-                            raise
+                        config = prepare_component_config(split_components)
+                        tg.create_task(development_agent(config, claude_config))
+                        work_queue.extend(split_components["parts"])
                             
                     elif route == "split":
                         # Need to split - send to splitting
-                        split_span = trace.span(name=f"splitting_{component['name']}")
-                        try:
-                            split_components = await splitting_agent(component, gemini_config, split_span)
-                            work_queue.extend(split_components["parts"])
-                            split_span.end()
-                        except Exception as e:
-                            split_span.end(status="error", statusMessage=str(e))
-                            raise
+                        split_components = await splitting_agent(component, gemini_config)
+                        
+                        config = prepare_component_config(split_components)
+                        tg.create_task(development_agent(config, claude_config))
+                        work_queue.extend(split_components["parts"])
 
-        trace.end(status="success")
         logger.info("Workflow: Execution completed successfully")
         
     except Exception as e:
-        trace.end(status="error", statusMessage=str(e))
         logger.error("Workflow: Execution failed")
         logger.debug(f"Detailed error: {str(e)}")
         raise
-    finally:
-        # Make sure all events are flushed before exiting
-        langfuse.flush()
 
 # -------------------------
 # Main Entrypoint

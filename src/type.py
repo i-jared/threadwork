@@ -18,9 +18,6 @@ class SplitComponentDict(TypedDict):
 def validate_component_dict(data: dict, agent_name: str) -> ComponentDict:
     """Validates that a dictionary matches the ComponentDict structure"""
     try:
-        if not isinstance(data, dict):
-            raise ValueError("Output must be a dictionary")
-            
         if not all(key in data for key in ["name", "type", "description"]):
             raise ValueError("Missing required fields: name, type, description")
             

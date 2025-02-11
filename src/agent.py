@@ -435,7 +435,7 @@ async def execute_workflow(description: str):
                             
                             split_components["description"] = expanded["description"]
                             config = prepare_component_config(split_components)
-                            tg.create_task(development_agent(config, gemini_config))
+                            tg.create_task(development_agent(config, gemini_config, session))
                             work_queue.extend(split_components["parts"])
                                 
                         elif route == "split":

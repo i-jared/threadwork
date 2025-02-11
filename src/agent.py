@@ -343,19 +343,22 @@ def prepare_component_config(components: dict) -> dict:
     """
     Helper function to prepare component configuration including paths and component list.
     """
-    # Set paths for all components
-    for component in components["parts"]:
-        component["path"] = 'tmp/pages/' + component["name"] if component["type"] == "page" else 'tmp/components/' + component["name"]
-    
-    # Create config with component paths
-    return {
-        "components": [component["path"] for component in components["parts"]],
+    config = {
         "name": components["name"],
         "type": components["type"],
         "description": components["description"],
         "path": 'tmp/pages/' + components["name"] if components["type"] == "page" else 'tmp/components/' + components["name"]
     }
 
+    # Only add components key if parts exist
+    if "parts" in components:
+        # Set paths for all components
+        for component in components["parts"]:
+            component["path"] = 'tmp/pages/' + component["name"] if component["type"] == "page" else 'tmp/components/' + component["name"]
+        
+        config["parts"] = [{"path": component["path"], "summary": component["summary"], } for component in components["parts"]]
+
+    return config
 # -------------------------
 # Workflow Execution
 # -------------------------

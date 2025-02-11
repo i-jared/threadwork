@@ -10,6 +10,9 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@/components/ui/button"
+import { Link } from "react-router-dom"
+import { PlusCircle } from "lucide-react"
 
 interface Project {
   id: number
@@ -35,6 +38,11 @@ export function ProjectList() {
     async function fetchProjects() {
       console.log('Fetching projects...')
       try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          throw new Error("User not logged in");
+        }
+
         const { data, error } = await supabase
           .from('projects')
           .select(`
@@ -43,6 +51,7 @@ export function ProjectList() {
             project_data,
             created_at
           `)
+          .eq('user_id', user.id)
           .order('created_at', { ascending: false })
           .throwOnError()
         
@@ -106,8 +115,14 @@ export function ProjectList() {
         <div className="p-4 space-y-4">
           {projects.length === 0 ? (
             <Card>
-              <CardContent className="pt-6">
+              <CardContent className="pt-6 flex flex-col items-center justify-center space-y-4">
                 <p className="text-center text-muted-foreground">No projects found</p>
+                <Button asChild>
+                  <Link to="/" className="inline-flex items-center group">
+                    <PlusCircle className="mr-2 h-4 w-4 transition-transform group-hover:rotate-90" />
+                    New Project
+                  </Link>
+                </Button>
               </CardContent>
             </Card>
           ) : (

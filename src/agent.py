@@ -25,9 +25,12 @@ logger = logging.getLogger(__name__)
 @observe(as_type="generation")
 async def make_api_call(prompt: str, api_config: dict, session: aiohttp.ClientSession) -> dict:
     """
-    Makes an API call to the given endpoint with the given headers and body.
+    Makes an API call to the given endpoint with the headers and body.
+    Includes retry logic for rate limit (429) errors.
     """
     config = build_api_request(prompt, api_config)
+    max_retries = 3
+    base_delay = 2  # Base delay in seconds
     
     langfuse_context.update_current_observation(
       name=api_config["fx"],
@@ -37,49 +40,69 @@ async def make_api_call(prompt: str, api_config: dict, session: aiohttp.ClientSe
           "provider": api_config["provider"]
       }
     )
-    try:
-        async with session.post(config["api_endpoint"], 
-                              headers=config["headers"], 
-                              data=config["body"]) as response:
-            response_text = await response.text()
-                
-            if response.status != 200:
-                error_msg = f"API request failed with status {response.status}: {response_text}"
-                logger.error(error_msg)
-                logger.debug(f"Request details: endpoint={config['api_endpoint']}, headers={config['headers']}")
-                raise Exception(error_msg)
-            
-            try:
-                result = json.loads(response_text)
-            except json.JSONDecodeError:
-                logger.error(f"Failed to parse response as JSON: {response_text}")
-                raise
-            
-            logger.debug(f"API Response: {result}")
-            api_output = extract_api_response(result, api_config["provider"])
 
-            # Update with generation details
-            langfuse_context.update_current_observation(
-                usage_details={
-                    "input": api_output["usage"]["input_tokens"],
-                    "output": api_output["usage"]["output_tokens"]
-                }
-            )
-            return api_output
-            
-    except aiohttp.ClientError as e:
-        error_msg = f"Network error during API call: {str(e)}"
-        logger.error(error_msg)
-        logger.debug(f"Request details: endpoint={config['api_endpoint']}, headers={config['headers']}")
-        raise Exception(error_msg) from e
-    except json.JSONDecodeError as e:
-        error_msg = f"Failed to parse API response as JSON: {str(e)}\nResponse text: {response_text}"
-        logger.error(error_msg)
-        raise Exception(error_msg) from e
-    except Exception as e:
-        error_msg = f"Unexpected error during API call: {str(e)}"
-        logger.error(error_msg)
-        raise Exception(error_msg) from e
+    for attempt in range(max_retries):
+        try:
+            async with session.post(config["api_endpoint"], 
+                                  headers=config["headers"], 
+                                  data=config["body"]) as response:
+                response_text = await response.text()
+                
+                if response.status == 429:
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)  # Exponential backoff
+                        logger.warning(f"Rate limit hit, retrying in {delay} seconds...")
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        error_msg = "Max retries reached for rate limit error"
+                        logger.error(error_msg)
+                        raise Exception(error_msg)
+                        
+                if response.status != 200:
+                    error_msg = f"API request failed with status {response.status}: {response_text}"
+                    logger.error(error_msg)
+                    logger.debug(f"Request details: endpoint={config['api_endpoint']}, headers={config['headers']}")
+                    raise Exception(error_msg)
+                
+                try:
+                    result = json.loads(response_text)
+                except json.JSONDecodeError:
+                    logger.error(f"Failed to parse response as JSON: {response_text}")
+                    raise
+                
+                logger.debug(f"API Response: {result}")
+                api_output = extract_api_response(result, api_config["provider"])
+
+                # Update with generation details
+                langfuse_context.update_current_observation(
+                    usage_details={
+                        "input": api_output["usage"]["input_tokens"],
+                        "output": api_output["usage"]["output_tokens"]
+                    }
+                )
+                return api_output
+
+        except aiohttp.ClientError as e:
+            error_msg = f"Network error during API call: {str(e)}"
+            logger.error(error_msg)
+            logger.debug(f"Request details: endpoint={config['api_endpoint']}, headers={config['headers']}")
+            raise Exception(error_msg) from e
+        except json.JSONDecodeError as e:
+            error_msg = f"Failed to parse API response as JSON: {str(e)}\nResponse text: {response_text}"
+            logger.error(error_msg)
+            raise Exception(error_msg) from e
+        except Exception as e:
+            if attempt < max_retries - 1 and "429" in str(e):
+                delay = base_delay * (2 ** attempt)
+                logger.warning(f"Rate limit hit, retrying in {delay} seconds...")
+                await asyncio.sleep(delay)
+                continue
+            error_msg = f"Unexpected error during API call: {str(e)}"
+            logger.error(error_msg)
+            raise Exception(error_msg) from e
+
+    raise Exception("Max retries reached")
 
 
 async def splitting_agent(input: dict, config: dict, session: aiohttp.ClientSession) -> SplitComponentDict:
@@ -148,9 +171,10 @@ async def planning_agent(input: str, config: dict, session: aiohttp.ClientSessio
 
     Your output MUST be valid json.Output the plan and first file details in the following JSON format:
     {{
-        "description": "detailed plan here",
-        "name": "name of main file of the project",
-        "path": "typical path to main file of the project",
+        "description": "str : <detailed plan here>",
+        "summary": "str: <very short summary of the project - what is it, what UI tech stack you're using, etc.>",
+        "name": "str: <name of main file of the project>",
+        "path": "str: <typical path to main file of the project>",
         "type": "page"
     }}"""
     try:
@@ -188,7 +212,7 @@ async def planning_agent(input: str, config: dict, session: aiohttp.ClientSessio
         raise
 
 
-async def development_agent(input: dict, config: dict, session: aiohttp.ClientSession) -> bool:
+async def development_agent(input: dict, project_config: dict, config: dict, session: aiohttp.ClientSession) -> bool:
     """
     Development Agent:
     Produces code files based on the provided description and name.
@@ -210,8 +234,13 @@ async def development_agent(input: dict, config: dict, session: aiohttp.ClientSe
             component_descriptions.append(f"{part['path']}: {part['summary']}")
 
     prompt = f"""
-    Write the code for the following page or component:
-    
+    Write the code for the following page or component, keeping in mind the following project details:
+    page/component name:
+    {input["name"]}
+    project details:
+    {project_config["summary"]}
+
+    component details:
     ```
     {input["description"]}
     ```
@@ -407,12 +436,17 @@ async def execute_workflow(description: str):
         "model": "deepseek-reasoner"
     }
 
-    default_config = deepseek_config
+    default_config = gemini_config
+
+    project_config = {
+        "user_description": description,
+    }
     
     try:
         async with aiohttp.ClientSession() as session:
             # Initial planning
             plan = await planning_agent(description, default_config, session)
+            project_config["summary"] = plan["summary"]
 
             # Initial splitting
             components = await splitting_agent(plan, gemini_config, session)
@@ -422,7 +456,7 @@ async def execute_workflow(description: str):
             config = prepare_component_config(components)
             config["path"] = 'tmp/' + components["name"]
     
-            asyncio.create_task(development_agent(config, claude_config, session))
+            asyncio.create_task(development_agent(config, project_config, claude_config, session))
     
             # Process queue for components that need work
             work_queue = components["parts"]
@@ -444,7 +478,7 @@ async def execute_workflow(description: str):
                             
                             split_components["description"] = expanded["description"]
                             config = prepare_component_config(split_components)
-                            tg.create_task(development_agent(config, claude_config, session))
+                            tg.create_task(development_agent(config, project_config, claude_config, session))
                             work_queue.extend(split_components["parts"])
                                 
                         elif route == "split":
@@ -453,12 +487,12 @@ async def execute_workflow(description: str):
                             
                             split_components["description"] = component["description"]
                             config = prepare_component_config(split_components)
-                            tg.create_task(development_agent(config, claude_config, session))
+                            tg.create_task(development_agent(config, project_config, claude_config, session))
                             work_queue.extend(split_components["parts"])
                         else:
                             # Ready to write - send to development
                             config = prepare_component_config(component)
-                            tg.create_task(development_agent(config, claude_config, session))
+                            tg.create_task(development_agent(config, project_config, claude_config, session))
     
         logger.info("Workflow: Execution completed successfully")
         
@@ -472,7 +506,12 @@ async def execute_workflow(description: str):
 # -------------------------
 
 if __name__ == '__main__':
-    # Example project specification
-    project_description = "A chat site without any authentication: just a chat interface. text input, see other people's messages, etc. Build it in React with typescript. main file should be App.tsx."
+    import argparse
+
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description='Execute workflow for project generation')
+    parser.add_argument('project_description', type=str, help='Description of the project to generate')
     
-    asyncio.run(execute_workflow(project_description))
+    args = parser.parse_args()
+    
+    asyncio.run(execute_workflow(args.project_description))

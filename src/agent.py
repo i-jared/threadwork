@@ -9,6 +9,7 @@ from config import build_api_request, extract_api_response
 from file import write_file, parse_json_response
 from logging_config import setup_logging
 from type import ComponentDict, SplitComponentDict, validate_component_dict, validate_split_output
+import shutil
 
 # Load environment variables
 load_dotenv()
@@ -29,8 +30,8 @@ async def make_api_call(prompt: str, api_config: dict, session: aiohttp.ClientSe
     Includes retry logic for rate limit (429) errors.
     """
     config = build_api_request(prompt, api_config)
-    max_retries = 3
-    base_delay = 2  # Base delay in seconds
+    max_retries = 5
+    base_delay = 3  # Base delay in seconds
     
     langfuse_context.update_current_observation(
       name=api_config["fx"],
@@ -125,7 +126,7 @@ async def splitting_agent(input: dict, config: dict, session: aiohttp.ClientSess
     {input['description']}
     ```
 
-    The format should be json structured as follows, with absolutely no other text or characters.
+    The format MUST be EXACTLY as follows, with NO additional text, whitespace, or characters whatsoever. Any deviation will cause an error:
 
     \'{{'
         "name": "{input['name']}",
@@ -216,6 +217,7 @@ async def development_agent(input: dict, project_config: dict, config: dict, ses
     """
     Development Agent:
     Produces code files based on the provided description and name.
+    Styles using Tailwind CSS.
 
     Input format: ComponentDict (must include path)
     Output: True if successful, False otherwise
@@ -235,7 +237,7 @@ async def development_agent(input: dict, project_config: dict, config: dict, ses
 
     prompt = f"""
     Write the code for the following page or component, keeping in mind the following project details:
-    page/component name:
+    page/component name, and use tailwind css for any styling:
     {input["name"]}
     project details:
     {project_config["summary"]}
@@ -415,6 +417,10 @@ async def execute_workflow(description: str):
        - Splitting (if needed)
     """
     
+    # Create tmp directories
+    os.makedirs('tmp/pages', exist_ok=True)
+    os.makedirs('tmp/components', exist_ok=True)
+    
     claude_config = {
         "provider": "anthropic",
         "api_key": os.getenv('ANTHROPIC_API_KEY'),
@@ -495,6 +501,15 @@ async def execute_workflow(description: str):
                             tg.create_task(development_agent(config, project_config, claude_config, session))
     
         logger.info("Workflow: Execution completed successfully")
+        # Zip the tmp folder
+        output_filename = "project_files"
+        directory = 'tmp'
+
+        try:
+            shutil.make_archive(output_filename, 'zip', directory)
+            logger.info(f"Workflow: Successfully zipped tmp folder to {output_filename}.zip")
+        except Exception as e:
+            logger.error(f"Workflow: Error zipping tmp folder: {str(e)}")
         
     except Exception as e:
         logger.error("Workflow: Execution failed")

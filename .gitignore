@@ -4,3 +4,4 @@ __pycache__/
 logs/
 tmp/
 node_modules/
+test/

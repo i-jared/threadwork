@@ -170,7 +170,7 @@ async def planning_agent(input: str, config: dict, session: aiohttp.ClientSessio
     {input}
     ```
 
-    Your output MUST be valid json.Output the plan and first file details in the following JSON format:
+    Your output MUST be EXACTLY in this JSON format, with NO additional text, whitespace, or characters whatsoever. Any deviation will cause an error:
     {{
         "description": "str : <detailed plan here>",
         "summary": "str: <very short summary of the project - what is it, what UI tech stack you're using, etc.>",
@@ -224,6 +224,7 @@ async def development_agent(input: dict, project_config: dict, config: dict, ses
     """
     # Validate input and ensure path exists
     input = validate_component_dict(input, "Development Agent (input)")
+
     if "path" not in input:
         raise ValueError("Development Agent input must include path field")
     
@@ -306,7 +307,8 @@ async def expounding_agent(input: dict, config: dict, session: aiohttp.ClientSes
     logger.info("Expounding Agent: Starting expounding process.")
     prompt = f"""Given the following component/page description, increase the detail and resolution of the description.
     Preserve the original name and type. Only include UI elements. Focus solely on the UI.
-    Return the result in the following format, with absolutely no other text or characters:
+    Return the result EXACTLY in the following JSON format, with NO additional text, whitespace, or characters whatsoever. Any deviation will cause an error:
+
 
     \'{{'
         "name": "{input['name']}",
@@ -353,7 +355,10 @@ async def routing_agent(input: str, config: dict, session: aiohttp.ClientSession
     {input}
     <end description>
 
-    Output ONLY one of these three words: "detail", "split", or "write"
+    CRITICAL: You MUST output EXACTLY one of these three words, with no punctuation, no spaces before or after, no newlines, and in lowercase:
+    detail
+    split
+    write
     """
 
     try:

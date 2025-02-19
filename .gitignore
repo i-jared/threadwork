@@ -5,3 +5,4 @@ logs/
 tmp/
 node_modules/
 test/
+.DS_Store

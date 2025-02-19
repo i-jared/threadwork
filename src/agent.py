@@ -1,5 +1,7 @@
 import asyncio
 import aiohttp
+import subprocess
+from pathlib import Path
 import logging
 import os
 import json
@@ -31,7 +33,7 @@ async def make_api_call(prompt: str, api_config: dict, session: aiohttp.ClientSe
     """
     config = build_api_request(prompt, api_config)
     max_retries = 5
-    base_delay = 3  # Base delay in seconds
+    base_delay = 4  # Base delay in seconds
     
     langfuse_context.update_current_observation(
       name=api_config["fx"],
@@ -121,6 +123,30 @@ async def splitting_agent(input: dict, config: dict, session: aiohttp.ClientSess
     prompt = f"""Split the following {input['type']} app UI description into smaller UI chunks. Only include UI elements.
     Each part should be a single component or a single page.
     Give each part a short summary (less than 20 words) that clearly states its purpose.
+
+    IMPORTANT SPLITTING GUIDELINES:
+    DO split when you see:
+    - Completely separate pages (e.g., a login page and a dashboard page)
+    - Major reusable components (e.g., a complex data table component that appears in multiple places)
+
+    DO NOT split:
+    - Simple UI elements that belong together (e.g., don't separate a form's input fields into individual components)
+    - Related elements that form a cohesive unit (e.g., keep a card's header, body, and footer together)
+
+    Example of GOOD splitting:
+    Input: "A web app with a login page and a dashboard. The dashboard has a complex data table showing user analytics and a sidebar with navigation links."
+    Split into: 
+    - login.tsx (page): Complete login page with form inputs and submit button
+    - dashboard.tsx (page): Main dashboard layout with sidebar and content area
+    - DataTable.tsx (component): Reusable analytics table with sorting and filtering
+
+    Example of BAD splitting (too granular):
+    Input: "A login form with username field, password field, and submit button"
+    DON'T split into:
+    - UsernameInput.tsx
+    - PasswordInput.tsx
+    - SubmitButton.tsx
+    (These should stay together in one login form component)
 
     ```
     {input['description']}
@@ -405,6 +431,110 @@ def prepare_component_config(components: dict) -> dict:
         config["parts"] = [{"path": component["path"], "summary": component["summary"]} for component in components["parts"]]
 
     return config
+
+# -------------------------
+# Add Installs
+# -------------------------
+async def create_react_app():
+    """Creates a new Vite React-TypeScript project with initial setup"""
+    try:
+        # Create test directory if it doesn't exist
+        test_dir = Path("test")
+        test_dir.mkdir(exist_ok=True)
+        
+        # Create the React app using bun
+        subprocess.run(
+            "bun create vite my-react-app --template react-ts",
+            shell=True,
+            check=True,
+            cwd=test_dir
+        )
+        logger.info("✅ React app created successfully")
+        
+        # Install dependencies
+        app_dir = test_dir / "my-react-app"
+        subprocess.run(
+            "bun install",
+            shell=True,
+            check=True,
+            cwd=app_dir
+        )
+        
+        # Install Tailwind CSS and its dependencies
+        subprocess.run(
+            "bun add -d tailwindcss postcss autoprefixer",
+            shell=True,
+            check=True,
+            cwd=app_dir
+        )
+        logger.info("✅ Tailwind CSS and dependencies installed")
+        
+        # Initialize Tailwind CSS configuration
+        subprocess.run(
+            "bunx tailwindcss init -p",
+            shell=True,
+            check=True,
+            cwd=app_dir
+        )
+        
+        # Update tailwind.config.js
+        tailwind_config = """/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}
+"""
+        with open(app_dir / "tailwind.config.js", "w") as f:
+            f.write(tailwind_config)
+            
+        # Update src/index.css with Tailwind directives
+        tailwind_css = """@tailwind base;
+@tailwind components;
+@tailwind utilities;
+"""
+        with open(app_dir / "src" / "index.css", "w") as f:
+            f.write(tailwind_css)
+            
+        print("✅ Tailwind CSS configured successfully")
+        
+        # Copy files from tmp/ to test/src/ if tmp exists
+        tmp_dir = Path("tmp")
+        if tmp_dir.exists():
+            dest_dir = test_dir / "my-react-app" / "src"
+            
+            # Create src directory if it doesn't exist
+            dest_dir.mkdir(exist_ok=True)
+            
+            # Copy all contents from tmp to test/src
+            for item in tmp_dir.glob("*"):
+                if item.is_file():
+                    shutil.copy2(item, dest_dir)
+                elif item.is_dir():
+                    shutil.copytree(item, dest_dir / item.name, dirs_exist_ok=True)
+            
+            # Delete tmp directory
+            shutil.rmtree(tmp_dir)
+            print("✅ Files copied and tmp directory cleaned up")
+        else:
+            print("ℹ️ No tmp directory found to copy files from")
+            
+    except subprocess.CalledProcessError as e:
+        print("❌ Error creating React app")
+        print(f"Command failed with exit code {e.returncode}")
+        return True  # Return something to make the await valid
+
+    except Exception as e:
+        print("❌ An error occurred during deployment")
+        print(f"Error details logged")
+        # Log the full error message
+        print(f"DEBUG: {str(e)}")
+
 # -------------------------
 # Workflow Execution
 # -------------------------
@@ -437,7 +567,7 @@ async def execute_workflow(description: str):
         "provider": "gemini",
         "api_key": os.getenv('GEMINI_API_KEY'),
         "max_tokens": 100000,
-        "model": "gemini-1.5-flash"
+        "model": "gemini-2.0-flash"
     }
 
     deepseek_config = {
@@ -470,7 +600,7 @@ async def execute_workflow(description: str):
             asyncio.create_task(development_agent(config, project_config, claude_config, session))
     
             # Process queue for components that need work
-            work_queue = components["parts"]
+            work_queue = components["parts"] 
             
             while work_queue:
                 current_batch = work_queue.copy()
@@ -506,13 +636,21 @@ async def execute_workflow(description: str):
                             tg.create_task(development_agent(config, project_config, claude_config, session))
     
         logger.info("Workflow: Execution completed successfully")
-        # Zip the tmp folder
+        # Zip the test folder
         output_filename = "project_files"
-        directory = 'tmp'
+        directory = 'test'
 
         try:
+             # Create Vite React-TypeScript project
+            success = await create_react_app()
+            if success:
+                logger.info("✅ Vite React app setup completed")
+
+            # Zip the test
             shutil.make_archive(output_filename, 'zip', directory)
             logger.info(f"Workflow: Successfully zipped tmp folder to {output_filename}.zip")
+            
+            
         except Exception as e:
             logger.error(f"Workflow: Error zipping tmp folder: {str(e)}")
         
@@ -535,3 +673,5 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     asyncio.run(execute_workflow(args.project_description))
+
+

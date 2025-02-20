@@ -1,4 +1,3 @@
-
 import asyncio
 import aiohttp
 import subprocess
@@ -15,6 +14,7 @@ from type import ComponentDict, SplitComponentDict, validate_component_dict, val
 import shutil
 import aiofiles
 from tool import run_build_check
+import re
 
 
 # Load environment variables
@@ -292,10 +292,42 @@ async def development_agent(input: dict, project_config: dict, config: dict, ses
             
         filename = input["path"]
         content = code
+        #  determin what packages are being imported using regex, but make sure to ignore our file imports or importing react
         
-        if not filename or not content:
-            logger.error("Development Agent: Missing filename or content in response")
-            return False
+        # The regex pattern (with re.MULTILINE for line-by-line matching)
+        import_pattern = re.compile(
+            r"^import\s+(?:{[^}]*}|\w+)\s+from\s+'(?!(?:\.\/|\.\.\/|react(?=['/]|$)))([^']+)';$",
+            re.MULTILINE
+        )
+
+        # Find all matching import package names
+        imports = import_pattern.findall(content)
+        logger.info(f"Development Agent: Imports: {imports}")
+
+        def get_install_package(package: str) -> str:
+            """
+            Returns the base package name for installation.
+            
+            For unscoped packages (like 'react-icons/fa'), returns only the first segment (e.g., 'react-icons').
+            For scoped packages (like '@scope/package/subpath'), returns the first two segments (e.g., '@scope/package').
+            Otherwise, returns the package as is.
+            """
+            if package.startswith('@'):
+                parts = package.split('/')
+                # Return only the scope and package name.
+                return '/'.join(parts[:2])
+            else:
+                # For non-scoped packages, only take the first segment.
+                return package.split('/')[0]
+
+        # Loop over each found package and run "bun add" with the processed package name.
+        for package in imports:
+            install_package = get_install_package(package)
+            logger.info(f"Adding package: {install_package} (from import: {package})")
+            subprocess.run(f"bun add {install_package}", shell=True, check=True, cwd="my-react-app")
+            if not filename or not content:
+                logger.error("Development Agent: Missing filename or content in response")
+                return False
             
         await write_file(filename, content)
         logger.info(f"Development Agent: Successfully processed file {filename}")

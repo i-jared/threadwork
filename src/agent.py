@@ -462,7 +462,7 @@ async def create_react_app():
         
         # Install Tailwind CSS and its dependencies
         subprocess.run(
-            "bun add -d tailwindcss postcss autoprefixer",
+            "bun add -d tailwindcss@3 postcss autoprefixer",
             shell=True,
             check=True,
             cwd=app_dir
@@ -471,7 +471,7 @@ async def create_react_app():
         
         # Initialize Tailwind CSS configuration
         subprocess.run(
-            "bunx tailwindcss init -p",
+            "bunx tailwindcss@3 init -p",
             shell=True,
             check=True,
             cwd=app_dir

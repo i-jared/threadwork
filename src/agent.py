@@ -1,3 +1,4 @@
+
 import asyncio
 import aiohttp
 import subprocess
@@ -12,6 +13,9 @@ from file import write_file, parse_json_response
 from logging_config import setup_logging
 from type import ComponentDict, SplitComponentDict, validate_component_dict, validate_split_output
 import shutil
+import aiofiles
+from tool import run_build_check
+
 
 # Load environment variables
 load_dotenv()
@@ -32,7 +36,7 @@ async def make_api_call(prompt: str, api_config: dict, session: aiohttp.ClientSe
     Includes retry logic for rate limit (429) errors.
     """
     config = build_api_request(prompt, api_config)
-    max_retries = 5
+    max_retries = 6
     base_delay = 4  # Base delay in seconds
     
     langfuse_context.update_current_observation(
@@ -122,7 +126,7 @@ async def splitting_agent(input: dict, config: dict, session: aiohttp.ClientSess
     logger.info("Splitting Agent: Starting splitting process.")
     prompt = f"""Split the following {input['type']} app UI description into smaller UI chunks. Only include UI elements.
     Each part should be a single component or a single page.
-    Give each part a short summary (less than 20 words) that clearly states its purpose.
+    Give each part a short summary (less than 20 words) that clearly states its purpose. Make sure to name files correctly, e.g., App.tsx, Login.tsx, BlahBlah.tsx, etc.
 
     IMPORTANT SPLITTING GUIDELINES:
     DO split when you see:
@@ -132,21 +136,6 @@ async def splitting_agent(input: dict, config: dict, session: aiohttp.ClientSess
     DO NOT split:
     - Simple UI elements that belong together (e.g., don't separate a form's input fields into individual components)
     - Related elements that form a cohesive unit (e.g., keep a card's header, body, and footer together)
-
-    Example of GOOD splitting:
-    Input: "A web app with a login page and a dashboard. The dashboard has a complex data table showing user analytics and a sidebar with navigation links."
-    Split into: 
-    - login.tsx (page): Complete login page with form inputs and submit button
-    - dashboard.tsx (page): Main dashboard layout with sidebar and content area
-    - DataTable.tsx (component): Reusable analytics table with sorting and filtering
-
-    Example of BAD splitting (too granular):
-    Input: "A login form with username field, password field, and submit button"
-    DON'T split into:
-    - UsernameInput.tsx
-    - PasswordInput.tsx
-    - SubmitButton.tsx
-    (These should stay together in one login form component)
 
     ```
     {input['description']}
@@ -159,7 +148,7 @@ async def splitting_agent(input: dict, config: dict, session: aiohttp.ClientSess
         "type": "{input['type']}",
         "parts": [
             \'{{'
-                "name": "generated name of the described part (eg. login.tsx, big_button.py, etc.)",
+                "name": "generated name of the described part (eg. login.jsx, big_button.jsx, etc.)",
                 "description": "detailed technical description of implementation",
                 "summary": "short description of the part (<20 words)",
                 "type": "type of the part, MUST BE EITHER 'component' or 'page'"
@@ -190,8 +179,8 @@ async def planning_agent(input: str, config: dict, session: aiohttp.ClientSessio
     """
     logger.info("Planning Agent: Starting planning process.")
     prompt = f"""Create a detailed description for the UI of the following app. Only include UI elements and pages in a 
-    high level overview.
-    
+    high level overview. 
+    Make sure to add a App.tsx file to the project.
     ```
     {input}
     ```
@@ -417,7 +406,7 @@ def prepare_component_config(components: dict) -> dict:
 
     # Only set path if not already present
     if "path" not in components:
-        config["path"] = 'tmp/pages/' + components["name"] if components["type"] == "page" else 'tmp/components/' + components["name"]
+        config["path"] = 'my-react-app/src/pages/' + components["name"] if components["type"] == "page" else 'my-react-app/src/components/' + components["name"]
     else:
         config["path"] = components["path"]
 
@@ -426,33 +415,227 @@ def prepare_component_config(components: dict) -> dict:
         # Set paths for components that don't have them
         for component in components["parts"]:
             if "path" not in component:
-                component["path"] = 'tmp/pages/' + component["name"] if component["type"] == "page" else 'tmp/components/' + component["name"]
+                component["path"] = 'my-react-app/src/pages/' + component["name"] if component["type"] == "page" else 'my-react-app/src/components/' + component["name"]
         
         config["parts"] = [{"path": component["path"], "summary": component["summary"]} for component in components["parts"]]
 
     return config
+
+
+# async def fix_build_errors_agent(errors: list[dict], config: dict, session: aiohttp.ClientSession) -> bool:
+#     """
+#     Fix Build Errors Agent:
+#     Analyzes build errors and attempts to fix them by:
+#     1. Creating missing local files with stub content
+#     2. Adding missing package dependencies
+#     3. Creating type definitions where needed
+
+#     Args:
+#         errors: List of error objects from build check
+#         config: Configuration for API calls
+#         session: aiohttp session for API calls
+
+#     Returns:
+#         bool: True if fixes were applied, False if no fixes needed
+#     """
+#     logger.info("Fix Build Errors Agent: Starting error analysis")
+    
+#     project_dir = Path("test/my-react-app")
+#     src_dir = project_dir / "src"
+#     package_json_path = project_dir / "package.json"
+    
+#     # Group errors by type
+#     missing_modules = []
+#     type_errors = []
+#     other_errors = []
+    
+#     for error in errors:
+#         if error["code"] == "TS2307":  # Cannot find module
+#             missing_modules.append(error)
+#         elif error["code"].startswith("TS"):  # Type-related errors
+#             type_errors.append(error)
+#         else:
+#             other_errors.append(error)
+    
+#     # Log categorized errors
+#     if missing_modules:
+#         logger.info("Missing Module Errors:")
+#         for error in missing_modules:
+#             logger.info(f"  • missing module: {error['file']}: {error['message']}")
+            
+#     if type_errors:
+#         logger.info("Type Errors:")
+#         for error in type_errors:
+#             logger.info(f"  • type error: {error['file']}: {error['message']}")
+            
+#     if other_errors:
+#         logger.info("Other Errors:")
+#         for error in other_errors:
+#             logger.info(f"  • other error: {error['file']}: {error['message']}")
+            
+#     if not any([missing_modules, type_errors, other_errors]):
+#         logger.info("No errors to fix")
+#         return False
+        
+#     # Handle missing modules first
+#     for error in missing_modules:
+#         module_name = error["message"].split("'")[1]  # Extract module name from error message
+        
+#         if module_name.startswith("."):
+#             # Local module
+#             file_path = (src_dir / module_name).with_suffix(".ts")
+#             if not file_path.exists():
+#                 # Generate stub file content based on the import path
+#                 prompt = f"""Create a minimal TypeScript stub file for: {module_name}
+#                 This should include basic types/interfaces/exports that would be expected from this module.
+#                 Include TODO comments for implementation. Context: This file is imported in {error['file']}.
+#                 Output just the code, nothing else. No backticks. Just code."""
+                
+#                 try:
+#                     config["fx"] = "stub_generation"
+#                     api_output = await make_api_call(prompt, config, session)
+                    
+#                     # Ensure directory exists
+#                     file_path.parent.mkdir(parents=True, exist_ok=True)
+                    
+#                     # Write stub file
+#                     await write_file(str(file_path), api_output["content"])
+#                     logger.info(f"Created stub file: {file_path}")
+                    
+#                 except Exception as e:
+#                     logger.error(f"Failed to create stub file {file_path}: {str(e)}")
+#                     continue
+#         else:
+#             # Package module
+#             try:
+#                 with open(package_json_path) as f:
+#                     package_json = json.load(f)
+                
+#                 # Check if package is already in dependencies or devDependencies
+#                 all_deps = {
+#                     **package_json.get("dependencies", {}),
+#                     **package_json.get("devDependencies", {})
+#                 }
+                
+#                 if module_name not in all_deps:
+#                     # Generate package.json update prompt
+#                     prompt = f"""What is the appropriate version of {module_name} to add to package.json?
+#                     Consider:
+#                     - Current React version: {package_json.get('dependencies', {}).get('react', 'unknown')}
+#                     - TypeScript version: {package_json.get('devDependencies', {}).get('typescript', 'unknown')}
+#                     Output only the version number, nothing else."""
+                    
+#                     try:
+#                         config["fx"] = "package_version"
+#                         api_output = await make_api_call(prompt, config, session)
+#                         version = api_output["content"].strip()
+                        
+#                         # Add to dependencies
+#                         if not "dependencies" in package_json:
+#                             package_json["dependencies"] = {}
+#                         package_json["dependencies"][module_name] = version
+                        
+#                         # Write updated package.json
+#                         with open(package_json_path, 'w') as f:
+#                             json.dump(package_json, f, indent=2)
+                            
+#                         logger.info(f"Added {module_name}@{version} to package.json")
+                        
+#                         # Run package installer
+#                         subprocess.run(
+#                             "bun install",
+#                             shell=True,
+#                             check=True,
+#                             cwd=project_dir
+#                         )
+#                         logger.info("Ran bun install")
+                        
+#                     except Exception as e:
+#                         logger.error(f"Failed to add package {module_name}: {str(e)}")
+#                         continue
+                        
+#             except Exception as e:
+#                 logger.error(f"Failed to process package.json: {str(e)}")
+#                 continue
+    
+#     # Handle type errors by creating type definitions if needed
+#     for error in type_errors:
+#         if "does not exist on type" in error["message"] or "has no exported member" in error["message"]:
+#             # Extract the type or member name
+#             prompt = f"""Create TypeScript type definitions to fix this error:
+#             Error: {error['message']}
+#             File: {error['file']}
+#             Line: {error['line']}
+            
+#             Output just the TypeScript type definitions, nothing else."""
+            
+#             try:
+#                 config["fx"] = "type_generation"
+#                 api_output = await make_api_call(prompt, config, session)
+                
+#                 # Create or update types file
+#                 types_path = src_dir / "types.ts"
+                
+#                 # Append new types to existing file or create new file
+#                 async with aiofiles.open(types_path, 'a') as f:
+#                     await f.write("\n\n" + api_output["content"])
+                    
+#                 logger.info(f"Added type definitions to {types_path}")
+                
+#             except Exception as e:
+#                 logger.error(f"Failed to create type definitions: {str(e)}")
+#                 continue
+    
+#     return True
+
+# async def post_react_agent(config: dict, session: aiohttp.ClientSession) -> dict:
+#     """
+#     Post-React Agent:
+#     Executes post-react operations such as build checking and fixing errors.
+#     """
+#     logger.info("Post-React Agent: Starting post-react operations.")
+    
+#     try:
+#         # Run initial build check
+#         result = await run_build_check()
+        
+#         if not result["build_success"]:
+#             async with aiohttp.ClientSession() as session:
+#                 # Attempt to fix build errors
+#                 fixes_applied = await fix_build_errors_agent(result["build_errors"], config, session)
+                
+#                 if fixes_applied:
+#                     # Run build check again after fixes
+#                     result = await run_build_check()
+        
+#         # Get the file list from src directory
+#         project_dir = Path("test/my-react-app")
+#         src_dir = project_dir / "src"
+#         result["src_files"] = [f.name for f in src_dir.iterdir() if f.is_file()]
+        
+#         logger.info("Post-React Agent: Operations completed successfully")
+#         return result
+
+#     except Exception as e:
+#         logger.error(f"Post-React Agent: Error encountered: {str(e)}")
+#         raise
 
 # -------------------------
 # Add Installs
 # -------------------------
 async def create_react_app():
     """Creates a new Vite React-TypeScript project with initial setup"""
-    try:
-        # Create test directory if it doesn't exist
-        test_dir = Path("test")
-        test_dir.mkdir(exist_ok=True)
-        
+    try:        
         # Create the React app using bun
         subprocess.run(
             "bun create vite my-react-app --template react-ts",
             shell=True,
             check=True,
-            cwd=test_dir
         )
         logger.info("✅ React app created successfully")
         
         # Install dependencies
-        app_dir = test_dir / "my-react-app"
+        app_dir = "my-react-app"
         subprocess.run(
             "bun install",
             shell=True,
@@ -503,27 +686,6 @@ export default {
             
         print("✅ Tailwind CSS configured successfully")
         
-        # Copy files from tmp/ to test/src/ if tmp exists
-        tmp_dir = Path("tmp")
-        if tmp_dir.exists():
-            dest_dir = test_dir / "my-react-app" / "src"
-            
-            # Create src directory if it doesn't exist
-            dest_dir.mkdir(exist_ok=True)
-            
-            # Copy all contents from tmp to test/src
-            for item in tmp_dir.glob("*"):
-                if item.is_file():
-                    shutil.copy2(item, dest_dir)
-                elif item.is_dir():
-                    shutil.copytree(item, dest_dir / item.name, dirs_exist_ok=True)
-            
-            # Delete tmp directory
-            shutil.rmtree(tmp_dir)
-            print("✅ Files copied and tmp directory cleaned up")
-        else:
-            print("ℹ️ No tmp directory found to copy files from")
-            
     except subprocess.CalledProcessError as e:
         print("❌ Error creating React app")
         print(f"Command failed with exit code {e.returncode}")
@@ -553,9 +715,22 @@ async def execute_workflow(description: str):
     """
     
     # Create tmp directories
-    os.makedirs('tmp/pages', exist_ok=True)
-    os.makedirs('tmp/components', exist_ok=True)
-    
+    # os.makedirs('tmp/pages', exist_ok=True)
+    # os.makedirs('tmp/components', exist_ok=True)
+        
+    try:
+        success = await create_react_app()
+        if success:
+            logger.info("✅ Vite React app setup completed")
+    except Exception as e:
+        logger.error(f"Workflow: Error creating React app: {str(e)}")
+        raise
+
+    os.makedirs('my-react-app/src/components')
+    os.makedirs('my-react-app/src/pages')
+    os.remove('my-react-app/src/App.tsx')
+
+
     claude_config = {
         "provider": "anthropic",
         "api_key": os.getenv('ANTHROPIC_API_KEY'),
@@ -595,7 +770,7 @@ async def execute_workflow(description: str):
             # Prepare initial config and develop main component
             components["description"] = plan["description"]
             config = prepare_component_config(components)
-            config["path"] = 'tmp/' + components["name"]
+            config["path"] = 'my-react-app/src/' + components["name"]
     
             asyncio.create_task(development_agent(config, project_config, claude_config, session))
     
@@ -636,23 +811,26 @@ async def execute_workflow(description: str):
                             tg.create_task(development_agent(config, project_config, claude_config, session))
     
         logger.info("Workflow: Execution completed successfully")
-        # Zip the test folder
+        # Zip the react folder
         output_filename = "project_files"
-        directory = 'test'
+        directory = 'my-react-app'
 
         try:
-             # Create Vite React-TypeScript project
-            success = await create_react_app()
-            if success:
-                logger.info("✅ Vite React app setup completed")
-
-            # Zip the test
+            # # Run post-react agent
+            # result = await post_react_agent(gemini_config, session)
+            # if result["build_success"]:
+            #     logger.info("✅ Build check completed successfully")
+            # else:
+            #     logger.info("❌ Build check failed")
+                
+            # Zip the react folder
             shutil.make_archive(output_filename, 'zip', directory)
-            logger.info(f"Workflow: Successfully zipped tmp folder to {output_filename}.zip")
+            logger.info(f"Workflow: Successfully zipped react folder to {output_filename}.zip")
             
+
             
         except Exception as e:
-            logger.error(f"Workflow: Error zipping tmp folder: {str(e)}")
+            logger.error(f"Workflow: Error zipping react folder: {str(e)}")
         
     except Exception as e:
         logger.error("Workflow: Execution failed")
@@ -673,5 +851,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     asyncio.run(execute_workflow(args.project_description))
+
 
 

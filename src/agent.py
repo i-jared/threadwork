@@ -159,7 +159,6 @@ async def splitting_agent(input: dict, config: dict, session: aiohttp.ClientSess
     try:
         config["fx"] = "splitting"
         api_output = await make_api_call(prompt, config, session)
-        logger.info("Splitting Agent: Successfully split project")
         
         result = parse_json_response(api_output["content"])
         validated_result = validate_split_output(result, "Splitting Agent")
@@ -177,7 +176,7 @@ async def planning_agent(input: str, config: dict, session: aiohttp.ClientSessio
     Planning Agent:
     Creates a structured project plan from the idea.
     """
-    logger.info("Planning Agent: Starting planning process.")
+
     prompt = f"""Create a detailed description for the UI of the following app. Only include UI elements and pages in a 
     high level overview. 
     Make sure to add a App.tsx file to the project.
@@ -196,7 +195,7 @@ async def planning_agent(input: str, config: dict, session: aiohttp.ClientSessio
     try:
         config["fx"] = "planning"
         api_output = await make_api_call(prompt, config, session)
-        logger.info("Planning Agent: Successfully received API response")
+
         logger.debug(f"Planning Agent: Raw response: {api_output}")
         
         logger.debug(f"Planning Agent: Extracted output: {api_output}")
@@ -209,7 +208,7 @@ async def planning_agent(input: str, config: dict, session: aiohttp.ClientSessio
             logger.debug(f"Planning Agent: Parsed result: {result}")
             
             validated_result = validate_component_dict(result, "Planning Agent")
-            logger.info("Planning Agent: Successfully validated result")
+
             
             return validated_result
             
@@ -243,17 +242,32 @@ async def development_agent(input: dict, project_config: dict, config: dict, ses
     if "path" not in input:
         raise ValueError("Development Agent input must include path field")
     
-    logger.info("Development Agent: Starting development process.")
-
     # Get component descriptions if they exist
     component_descriptions = []
     if "parts" in input:
         for part in input["parts"]:
             component_descriptions.append(f"{part['path']}: {part['summary']}")
 
+    # Get prop contract if it exists
+    contract_info = ""
+    if "prop_contracts" in project_config:
+        contract = next(
+            (c for c in project_config["prop_contracts"]["contracts"] 
+             if c["path"] == input["path"]),
+            None
+        )
+        if contract:
+            contract_info = f"""
+            Props Interface:
+            {contract['propsInterface']}
+            
+            Required Props: {', '.join(contract['required'])}
+            Optional Props: {', '.join(contract['optional'])}
+            """
+
     prompt = f"""
     Write the code for the following page or component, keeping in mind the following project details:
-    page/component name, and use tailwind css for any styling:
+    page/component name, and use tailwind css for any styling, MPORTANT: Do not wrap the code in any triple backticks or Markdown syntax:
     {input["name"]}
     project details:
     {project_config["summary"]}
@@ -262,6 +276,8 @@ async def development_agent(input: dict, project_config: dict, config: dict, ses
     ```
     {input["description"]}
     ```
+
+    {contract_info}
 
     {
     'Available components and their purposes:\n' + '\n'.join(component_descriptions) if component_descriptions else 
@@ -274,12 +290,11 @@ async def development_agent(input: dict, project_config: dict, config: dict, ses
     try:
         config["fx"] = "development"
         api_output = await make_api_call(prompt, config, session)
-        logger.info(f"Development Agent: Successfully generated code")
         
         code = api_output["content"]
-        
         # Extract code from possible markdown code block
         if code.startswith("```"):
+            
             lines = code.split("\n")
             # Remove first line (```language) and last line (```)
             code = "\n".join(lines[1:-1])
@@ -322,6 +337,7 @@ async def development_agent(input: dict, project_config: dict, config: dict, ses
 
         # Loop over each found package and run "bun add" with the processed package name.
         for package in imports:
+            print("PRINTING PACKAGE -- ", package)
             install_package = get_install_package(package)
             logger.info(f"Adding package: {install_package} (from import: {package})")
             subprocess.run(f"bun add {install_package}", shell=True, check=True, cwd="my-react-app")
@@ -351,7 +367,6 @@ async def expounding_agent(input: dict, config: dict, session: aiohttp.ClientSes
     # Validate input
     input = validate_component_dict(input, "Expounding Agent (input)")
     
-    logger.info("Expounding Agent: Starting expounding process.")
     prompt = f"""Given the following component/page description, increase the detail and resolution of the description.
     Preserve the original name and type. Only include UI elements. Focus solely on the UI.
     Return the result EXACTLY in the following JSON format, with NO additional text, whitespace, or characters whatsoever. Any deviation will cause an error:
@@ -392,7 +407,6 @@ async def routing_agent(input: str, config: dict, session: aiohttp.ClientSession
     
     Returns one of: "detail", "split", "write"
     """
-    logger.info("Routing Agent: Starting routing process.")
     prompt = f"""Analyze the following app segment description and determine if it:
     1. Needs more detail before it can be processed (output "detail")
     2. Contains multiple components that should have their own files and should be split up (output "split")
@@ -411,7 +425,6 @@ async def routing_agent(input: str, config: dict, session: aiohttp.ClientSession
     try:
         config["fx"] = "routing"
         api_output = await make_api_call(prompt, config, session)
-        logger.info("Routing Agent: Successfully determined route")
         
         route = api_output["content"].strip().lower()
         
@@ -667,15 +680,27 @@ async def create_react_app():
         logger.info("✅ React app created successfully")
         
         # Install dependencies
-        app_dir = "my-react-app"
+        app_dir = Path("my-react-app")
         subprocess.run(
             "bun install",
             shell=True,
             check=True,
             cwd=app_dir
         )
-        
+        logger.info("✅ Base dependencies installed")
+
+        # Install react-router-dom
+        logger.info("Installing react-router-dom...")
+        subprocess.run(
+            "bun add react-router-dom react-icons lucide-react",
+            shell=True,
+            check=True,
+            cwd=app_dir
+        )
+        logger.info("✅ react-router-dom installed")
+
         # Install Tailwind CSS and its dependencies
+        logger.info("Installing Tailwind CSS and dependencies...")
         subprocess.run(
             "bun add -d tailwindcss@3 postcss autoprefixer",
             shell=True,
@@ -685,15 +710,24 @@ async def create_react_app():
         logger.info("✅ Tailwind CSS and dependencies installed")
         
         # Initialize Tailwind CSS configuration
-        subprocess.run(
-            "bunx tailwindcss@3 init -p",
-            shell=True,
-            check=True,
-            cwd=app_dir
-        )
-        
+        logger.info("Initializing Tailwind configuration...")
+        try:
+            subprocess.run(
+                "bunx tailwindcss@3 init -p",
+                shell=True,
+                check=True,
+                cwd=app_dir,
+                capture_output=True,
+                text=True
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error(f"❌ Failed to initialize Tailwind: {e.stderr}")
+            raise
+
         # Update tailwind.config.js
-        tailwind_config = """/** @type {import('tailwindcss').Config} */
+        logger.info("Updating tailwind.config.js...")
+        try:
+            tailwind_config = """/** @type {import('tailwindcss').Config} */
 export default {
   content: [
     "./index.html",
@@ -705,30 +739,99 @@ export default {
   plugins: [],
 }
 """
-        with open(app_dir / "tailwind.config.js", "w") as f:
-            f.write(tailwind_config)
-            
-        # Update src/index.css with Tailwind directives
+            config_path = Path(app_dir) / "tailwind.config.js"
+            logger.info(f"Writing config to: {config_path}")
+            with open(config_path, "w") as f:
+                f.write(tailwind_config)
+            logger.info("✅ Successfully wrote tailwind.config.js")
+        except Exception as e:
+            logger.error(f"❌ Failed to write tailwind.config.js: {str(e)}")
+            raise
+        
+        # Update src/index.css with Tailwind directives at the top
+        logger.info("Updating index.css with Tailwind directives...")
         tailwind_css = """@tailwind base;
 @tailwind components;
 @tailwind utilities;
-"""
-        with open(app_dir / "src" / "index.css", "w") as f:
-            f.write(tailwind_css)
+
+"""  # Note the extra newline
+        try:
+            # Read existing content
+            with open(app_dir / "src" / "index.css", "r") as f:
+                existing_content = f.read()
+            logger.debug(f"Existing index.css content: {existing_content}")
             
-        print("✅ Tailwind CSS configured successfully")
-        
+            # Remove first line if it's a comment (contains //) and not a Tailwind directive
+            content_lines = existing_content.splitlines()
+            if content_lines and '//' in content_lines[0] and not content_lines[0].startswith('@tailwind'):
+                existing_content = '\n'.join(content_lines[1:])
+                logger.info("Removed comment line from index.css")
+            
+            # Write directives at top followed by existing content
+            with open(app_dir / "src" / "index.css", "w") as f:
+                f.write(tailwind_css + existing_content)
+            logger.info("✅ Successfully updated index.css")
+                
+        except FileNotFoundError:
+            # If file doesn't exist, create it with just the directives
+            logger.warning("index.css not found, creating new file")
+            with open(app_dir / "src" / "index.css", "w") as f:
+                f.write(tailwind_css)
+            
+        logger.info("✅ Tailwind CSS configured successfully")
+
+        # Fix main.tsx App import
+        logger.info("Fixing App import in main.tsx...")
+        try:
+            main_path = app_dir / "src" / "main.tsx"
+            with open(main_path, "r") as f:
+                content = f.read()
+            
+            # Replace the default import with named import
+            fixed_content = content.replace(
+                "import App from './App.tsx'",
+                "import { App } from './App.tsx'"
+            )
+            
+            with open(main_path, "w") as f:
+                f.write(fixed_content)
+            logger.info("✅ Fixed App import in main.tsx")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to fix App import: {str(e)}")
+            raise
+
+        return True
+
     except subprocess.CalledProcessError as e:
-        print("❌ Error creating React app")
-        print(f"Command failed with exit code {e.returncode}")
+        logger.error("❌ Error creating React app")
+        logger.error(f"Command failed with exit code {e.returncode}")
         return True  # Return something to make the await valid
 
     except Exception as e:
-        print("❌ An error occurred during deployment")
-        print(f"Error details logged")
+        logger.error("❌ An error occurred during deployment")
+        logger.error(f"Error details logged")
         # Log the full error message
-        print(f"DEBUG: {str(e)}")
+        logger.debug(f"DEBUG: {str(e)}")
 
+
+def normalize_import(path: str, all_files: set[str]) -> str:
+    """
+    If path does not have an extension, try .tsx, .ts, or .css.
+    If it does, return it as-is.
+    """
+    # Already has an extension
+    if any(path.endswith(ext) for ext in [".tsx", ".ts"]):
+        return path
+
+    # Try adding extensions in order of likelihood
+    for ext in [".tsx", ".ts", ".css"]:
+        candidate = path + ext
+        if candidate in all_files:
+            return candidate
+
+    # If none match, return the path as-is
+    return path
 
 async def blueprint_agent(input: str, config: dict, session: aiohttp.ClientSession) -> dict:
     """
@@ -744,6 +847,14 @@ async def blueprint_agent(input: str, config: dict, session: aiohttp.ClientSessi
     Returns:
         dict: Complete blueprint of all files
     """
+    # Define components that don't need Props interfaces
+    NO_PROPS_COMPONENTS = {
+        "App.tsx",  # Main App component typically doesn't need props
+        "index.tsx",  # Entry point file
+        "layout.tsx",  # Layout components often don't need props
+
+    }
+    
     logger.info("Blueprint Agent: Starting blueprint creation")
     
     prompt = f"""Create a complete blueprint of all files needed for this React TypeScript project.
@@ -752,6 +863,15 @@ async def blueprint_agent(input: str, config: dict, session: aiohttp.ClientSessi
     - Short summary of the file's purpose (1-2 sentences)
     - List of exports (components, functions, types, etc.)
     - List of imports (both npm packages and local files)
+
+    CRITICAL REQUIREMENTS:
+    1. For EVERY React component (except App.tsx and layout files), you MUST include both the component name AND its Props interface in exports
+       Example: for a component named "HabitList", include both "HabitList" and "HabitListProps" in exports
+    2. When listing local imports, always include the full file extension:
+       - Use .tsx for React TypeScript components
+       - Use .ts for TypeScript files
+       - Use .css for stylesheets
+       Example: 'components/HabitList.tsx' instead of 'components/HabitList'
 
     Project Description:
     ```
@@ -764,10 +884,10 @@ async def blueprint_agent(input: str, config: dict, session: aiohttp.ClientSessi
             {{
                 "path": "str: relative path from src/ (e.g., components/Header.tsx)",
                 "summary": "str: brief description of file purpose",
-                "exports": ["list", "of", "exports"],
+                "exports": ["list", "of", "exports", "including", "ComponentProps"],
                 "imports": {{
                     "npm": ["list", "of", "npm", "packages"],
-                    "local": ["list", "of", "local", "file", "imports"]
+                    "local": ["list", "of", "local", "imports", "with", "extensions"]
                 }}
             }}
         ],
@@ -780,16 +900,54 @@ async def blueprint_agent(input: str, config: dict, session: aiohttp.ClientSessi
     try:
         config["fx"] = "blueprint"
         api_output = await make_api_call(prompt, config, session)
+        
+        # Log the raw response for debugging
+        
         result = parse_json_response(api_output["content"])
+        
+        # Validate Props interfaces are included for components
+        for file in result["files"]:
+            # Get just the filename without the path
+            filename = file["path"].split("/")[-1]
+            
+            if file["path"].endswith(".tsx") and filename not in NO_PROPS_COMPONENTS:
+                component_name = filename.replace(".tsx", "")
+                props_interface = f"{component_name}Props"
+                
+                if props_interface not in file["exports"]:
+                    logger.warning(f"Adding missing Props interface {props_interface} to {file['path']}")
+                    file["exports"].append(props_interface)
+                else:
+                    logger.info(f"✓ Found Props interface {props_interface} in {file['path']}")
+            else:
+                if filename in NO_PROPS_COMPONENTS:
+                    logger.info(f"ℹ Skipping Props interface for {filename} (in exception list)")
+                
         
         # Validate that all local imports reference existing files
         all_files = {file["path"] for file in result["files"]}
+        
+        # Track if we've found any missing imports
+        has_missing_imports = False
+        
         for file in result["files"]:
             for local_import in file["imports"]["local"]:
-                if local_import not in all_files:
-                    result["validation"]["allLocalImportsExist"] = False
+                normalized = normalize_import(local_import, all_files)
+                if normalized not in all_files:
+                    if not has_missing_imports:
+                        # Print file list only once when first missing import is found
+                        logger.warning("Available files in blueprint:")
+                        for available_file in sorted(all_files):
+                            logger.warning(f"  - {available_file}")
+                        has_missing_imports = True
+                            
                     logger.warning(f"Blueprint Agent: Local import {local_import} not found in file list")
-        
+                    result["validation"]["allLocalImportsExist"] = False
+                else:
+                    # Replace the old value with the normalized path
+                    local_import_index = file["imports"]["local"].index(local_import)
+                    file["imports"]["local"][local_import_index] = normalized
+
         # Basic cycle detection with safe neighbor lookup
         def has_cycle(graph, start, visited=None, rec_stack=None):
             if visited is None:
@@ -886,7 +1044,7 @@ async def prop_contract_agent(blueprint: dict, config: dict, session: aiohttp.Cl
     
     # Filter for component files from blueprint
     component_files = [f for f in blueprint["files"] if f["path"].startswith("components/") or f["path"].endswith(".tsx")]
-    
+
     prompt = f"""Create a complete TypeScript prop contract for all React components in this project.
     For each component, define its props interface with proper TypeScript types.
 
@@ -915,22 +1073,22 @@ async def prop_contract_agent(blueprint: dict, config: dict, session: aiohttp.Cl
     try:
         config["fx"] = "prop_contract"
         api_output = await make_api_call(prompt, config, session)
+        
+        
         result = parse_json_response(api_output["content"])
         
         # Validate contracts match blueprint components
         blueprint_components = {f["path"]: f["exports"] for f in component_files}
         for contract in result["contracts"]:
             if contract["path"] not in blueprint_components:
-                logger.warning(f"Prop Contract Agent: Contract for unknown component {contract['path']}")
+                logger.warning(f"Contract for unknown component {contract['path']}")
             elif f"{contract['componentName']}Props" not in blueprint_components[contract["path"]]:
-                logger.warning(f"Prop Contract Agent: Missing Props interface in blueprint for {contract['componentName']}")
+                logger.warning(f"Missing Props interface in blueprint for {contract['componentName']}")
         
-        logger.info("Prop Contract Agent: Successfully created prop contracts")
         return result
 
     except Exception as e:
         logger.error("Prop Contract Agent: Error encountered")
-        logger.debug(f"Detailed error: {str(e)}")
         raise
 
 async def validate_prop_contract(code: str, contract: dict) -> tuple[bool, list[str]]:
@@ -970,26 +1128,26 @@ async def generate_file_code(file_info: dict, blueprint: dict, prop_contracts: d
     """
     Generates code for a single file based on the blueprint specifications and prop contracts.
     """
-    logger.info(f"Generating code for file: {file_info['path']}")
     
     # Find matching prop contract if it exists
-    contract = next(
-        (c for c in prop_contracts.get("contracts", []) if c["path"] == file_info["path"]),
-        None
-    )
+    contract = None
+    if "prop_contracts" in config:
+        for c in config["prop_contracts"]["contracts"]:
+            if c["path"] == file_info["path"]:
+                contract = c
+                break
     
     contract_info = ""
     if contract:
         contract_info = f"""
-        Props Interface:
+        PROPS INTERFACE:
         {contract['propsInterface']}
         
         Required Props: {', '.join(contract['required'])}
         Optional Props: {', '.join(contract['optional'])}
         """
     
-    prompt = f"""Generate the complete code for this React TypeScript file.
-    Strictly follow these specifications:
+    prompt = f"""Generate optimized React TypeScript code for this file. Follow these requirements:
 
     File Path: {file_info['path']}
     Summary: {file_info['summary']}
@@ -1002,15 +1160,52 @@ async def generate_file_code(file_info: dict, blueprint: dict, prop_contracts: d
     {contract_info}
 
     CRITICAL REQUIREMENTS:
-    1. Use ONLY the specified imports - no additional local imports
+    1. Use ONLY the specified imports
     2. Implement ALL specified exports
     3. Use Tailwind CSS for styling
     4. Follow React + TypeScript best practices
     5. Include JSDoc comments for components and functions
     6. Implement props interface EXACTLY as specified
     7. Use all required props in the component implementation
+    8. ALWAYS use destructured imports for local files, e.g.:
+       import {{ ComponentName }} from './ComponentName'
+       NOT: import ComponentName from './ComponentName'
 
-    Return ONLY the complete file code, no explanations or markdown formatting.
+    PERFORMANCE OPTIMIZATION REQUIREMENTS WHEN WRITING .tsx OR .ts FILES:
+    1. Memoize components that receive props using React.memo when appropriate
+    2. Move object/array literals outside component definitions or use useMemo
+    3. Use useCallback for event handlers and function props
+    4. Avoid inline styles - use Tailwind classes instead
+    5. If using Context, split into smaller contexts to prevent unnecessary rerenders
+    6. Place expensive computations inside useMemo hooks
+    7. Define callback functions with useCallback when passed as props
+    8. Extract complex child components to prevent parent rerenders from affecting them
+
+    Example optimization patterns to follow:
+    ```typescript
+    // Stable object definitions outside component
+    const defaultStyles = (curly bracket here) padding: '1rem' (curly bracket here);
+
+
+    // Memoized component with proper prop types
+    const MyComponent = React.memo(((bracket here)data, onAction (bracket here): MyComponentProps) => (curly bracket here)
+      // Memoized expensive computations
+      const processedData = useMemo(() => expensiveProcess(data), [data]);
+      
+      // Stable callback functions
+      const handleClick = useCallback(() => (curly bracket here)
+        onAction(processedData);
+      (curly bracket here), [onAction, processedData]);
+
+      return (
+        <div className="p-4 bg-white rounded-lg shadow">
+          (curly bracket here) /* Use Tailwind styles */(curly bracket here)
+        </div>
+      );
+    (curly bracket here));
+    ```
+
+    Return ONLY the complete file code, no explanations or markdown.
     """
 
     try:
@@ -1018,6 +1213,45 @@ async def generate_file_code(file_info: dict, blueprint: dict, prop_contracts: d
         api_output = await make_api_call(prompt, config, session)
         code = api_output["content"]
         
+        # Extract code from possible markdown code block
+        if code.startswith("```"):
+            lines = code.split("\n")
+            # Remove first line (```language) and last line (```)
+            code = "\n".join(lines[1:-1])
+
+        # Add package installation logic
+        import_pattern = re.compile(
+            r"^import\s+(?:{[^}]*}|\w+)\s+from\s+'(?!(?:\.\/|\.\.\/|react(?=['/]|$)))([^']+)';$",
+            re.MULTILINE
+        )
+
+        # Find all matching import package names
+        imports = import_pattern.findall(code)
+        logger.info(f"Generate File Code: Found imports: {imports}")
+
+        def get_install_package(package: str) -> str:
+            """
+            Returns the base package name for installation.
+            For unscoped packages (like 'react-icons/fa'), returns only the first segment (e.g., 'react-icons').
+            For scoped packages (like '@scope/package/subpath'), returns the first two segments (e.g., '@scope/package').
+            """
+            if package.startswith('@'):
+                parts = package.split('/')
+                return '/'.join(parts[:2])
+            else:
+                return package.split('/')[0]
+
+        # Install required packages
+        for package in imports:
+            install_package = get_install_package(package)
+            logger.info(f"Installing package: {install_package} (from import: {package})")
+            try:
+                subprocess.run(f"bun add {install_package}", shell=True, check=True, cwd="my-react-app")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Failed to install package {install_package}: {str(e)}")
+                # Continue with other packages even if one fails
+                continue
+
         # Validate prop contract if it exists
         if contract:
             is_valid, issues = await validate_prop_contract(code, contract)
@@ -1166,7 +1400,6 @@ async def fix_agent(error: dict, file_content: str, blueprint: dict, prop_contra
     Generates fixes for build errors based on error type.
     Returns updated file content.
     """
-    logger.info(f"Fix Agent: Attempting to fix error in {error['file']}")
     
     # Get relevant file info from blueprint
     file_info = next((f for f in blueprint["files"] if f["path"].endswith(error["file"])), None)
@@ -1174,10 +1407,12 @@ async def fix_agent(error: dict, file_content: str, blueprint: dict, prop_contra
         raise ValueError(f"Could not find file info for {error['file']} in blueprint")
     
     # Get prop contract if it exists
-    contract = next(
-        (c for c in prop_contracts.get("contracts", []) if c["path"] == file_info["path"]),
-        None
-    )
+    contract = None
+    if "prop_contracts" in config:
+        for c in config["prop_contracts"]["contracts"]:
+            if c["path"] == file_info["path"]:
+                contract = c
+                break
     
     prompt = f"""Fix the following error in the React TypeScript file:
 
@@ -1230,10 +1465,8 @@ async def iterative_build_check(blueprint: dict, prop_contracts: dict, config: d
     Performs iterative build checks and fixes errors.
     Returns True if all errors are fixed or max iterations reached.
     """
-    logger.info("Starting iterative build check")
     
     for iteration in range(max_iterations):
-        logger.info(f"Build iteration {iteration + 1}/{max_iterations}")
         
         # Run build check
         build_result = await run_build_check()
@@ -1278,14 +1511,13 @@ async def iterative_build_check(blueprint: dict, prop_contracts: dict, config: d
 @observe()
 async def execute_workflow(description: str):
     """
-    Executes the workflow with Langfuse tracing in the following pattern:
-    1. Blueprint creation
-    2. Stub file generation (optional)
-    3. Planning
-    4. Initial splitting
-    5. Development loop
+    Executes the workflow in the following pattern:
+    1. Creates a new Vite React TypeScript app (with Tailwind).
+    2. Generates a blueprint for all files.
+    3. Creates prop contracts for each component.
+    4. Generates code for each file using the blueprint and prop contracts.
+    5. Iteratively checks for build errors and attempts to fix them.
     """
-    
     try:
         success = await create_react_app()
         if success:
@@ -1294,33 +1526,19 @@ async def execute_workflow(description: str):
         logger.error(f"Workflow: Error creating React app: {str(e)}")
         raise
 
+    # Setup directories
     os.makedirs('my-react-app/src/components', exist_ok=True)
     os.makedirs('my-react-app/src/pages', exist_ok=True)
     if os.path.exists('my-react-app/src/App.tsx'):
         os.remove('my-react-app/src/App.tsx')
 
-    claude_config = {
-        "provider": "anthropic",
-        "api_key": os.getenv('ANTHROPIC_API_KEY'),
-        "max_tokens": 8192,
-        "model": "claude-3-5-sonnet-20241022"
-    }
-
-    gemini_config = {
+    # API configurations
+    default_config = {
         "provider": "gemini",
         "api_key": os.getenv('GEMINI_API_KEY'),
         "max_tokens": 100000,
         "model": "gemini-2.0-flash"
     }
-
-    deepseek_config = {
-        "provider": "deepseek",
-        "api_key": os.getenv('DEEPSEEK_API_KEY'),
-        "max_tokens": 10000,
-        "model": "deepseek-reasoner"
-    }
-
-    default_config = gemini_config
 
     project_config = {
         "user_description": description,
@@ -1328,13 +1546,14 @@ async def execute_workflow(description: str):
     
     try:
         async with aiohttp.ClientSession() as session:
-            # Generate complete blueprint
+            # 1) Generate a complete blueprint
             blueprint = await blueprint_agent(description, default_config, session)
-            
-            # Generate prop contracts
+
+            # 2) Generate prop contracts and store in project_config
             prop_contracts = await prop_contract_agent(blueprint, default_config, session)
+            project_config["prop_contracts"] = prop_contracts
             
-            # Generate initial files
+            # 3) Generate initial files from the blueprint
             for file_info in blueprint["files"]:
                 try:
                     code = await generate_file_code(file_info, blueprint, prop_contracts, default_config, session)
@@ -1343,24 +1562,16 @@ async def execute_workflow(description: str):
                     logger.error(f"Failed to generate {file_info['path']}: {str(e)}")
                     continue
             
-            # Perform iterative build checks and fixes
+            # 4) Iteratively build, parse errors, and try to fix them
             build_success = await iterative_build_check(blueprint, prop_contracts, default_config, session)
             if build_success:
                 logger.info("Successfully completed all build checks")
             else:
                 logger.warning("Some build errors could not be fixed automatically")
 
-            # Generate prop contracts
-            prop_contracts = await prop_contract_agent(blueprint, default_config, session)
-            
-            # Optionally create stub files
-            if blueprint["validation"]["allLocalImportsExist"] and blueprint["validation"]["noCyclicalDependencies"]:
-                await create_stubs(blueprint)
-            
-            # Generate each file
+            # 5) Regenerate or finalize each file, ensuring we install packages for new imports
             for file_info in blueprint["files"]:
                 try:
-                    # Generate the code with prop contracts
                     code = await generate_file_code(file_info, blueprint, prop_contracts, default_config, session)
                     
                     # Validate the generated code
@@ -1384,79 +1595,16 @@ async def execute_workflow(description: str):
                 except Exception as e:
                     logger.error(f"Error processing file {file_info['path']}: {str(e)}")
                     continue
-            
-            # # Continue with existing workflow
-            # plan = await planning_agent(description, default_config, session)
-            # project_config["summary"] = plan["summary"]
 
-            # # Initial splitting
-            # components = await splitting_agent(plan, gemini_config, session)
-            
-            # # Prepare initial config and develop main component
-            # components["description"] = plan["description"]
-            # config = prepare_component_config(components)
-            # config["path"] = 'my-react-app/src/' + components["name"]
-    
-            # asyncio.create_task(development_agent(config, project_config, default_config, session))
-    
-            # # Process queue for components that need work
-            # work_queue = components["parts"] 
-            
-            # while work_queue:
-            #     current_batch = work_queue.copy()
-            #     work_queue.clear()
-                
-            #     # Process all current components concurrently
-            #     async with asyncio.TaskGroup() as tg:
-            #         for component in current_batch:
-            #             # Determine next steps
-            #             route = await routing_agent(component["description"], gemini_config, session)
-                        
-            #             if route == "detail":
-            #                 # Need more detail - send to expounding then splitting
-            #                 expanded = await expounding_agent(component, gemini_config, session)
-            #                 split_components = await splitting_agent(expanded, gemini_config, session)
-                            
-            #                 split_components["description"] = expanded["description"]
-            #                 config = prepare_component_config(split_components)
-            #                 tg.create_task(development_agent(config, project_config, default_config, session))
-            #                 work_queue.extend(split_components["parts"])
-                                
-            #             elif route == "split":
-            #                 # Need to split - send to splitting
-            #                 split_components = await splitting_agent(component, gemini_config, session)
-                            
-            #                 split_components["description"] = component["description"]
-            #                 config = prepare_component_config(split_components)
-            #                 tg.create_task(development_agent(config, project_config, default_config, session))
-            #                 work_queue.extend(split_components["parts"])
-            #             else:
-            #                 # Ready to write - send to development
-            #                 config = prepare_component_config(component)
-            #                 tg.create_task(development_agent(config, project_config, default_config, session))
-    
         logger.info("Workflow: Execution completed successfully")
-        # Zip the react folder
-        output_filename = "project_files"
-        directory = 'my-react-app'
 
+        # Create final zip archive
         try:
-            # # Run post-react agent
-            # result = await post_react_agent(gemini_config, session)
-            # if result["build_success"]:
-            #     logger.info("✅ Build check completed successfully")
-            # else:
-            #     logger.info("❌ Build check failed")
-                
-            # Zip the react folder
-            shutil.make_archive(output_filename, 'zip', directory)
-            logger.info(f"Workflow: Successfully zipped react folder to {output_filename}.zip")
-            
-
-            
+            shutil.make_archive("project_files", 'zip', 'my-react-app')
+            logger.info("✅ Successfully created project_files.zip")
         except Exception as e:
-            logger.error(f"Workflow: Error zipping react folder: {str(e)}")
-        
+            logger.error(f"Error creating zip archive: {str(e)}")
+
     except Exception as e:
         logger.error("Workflow: Execution failed")
         logger.debug(f"Detailed error: {str(e)}")

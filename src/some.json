@@ -2,14 +2,6 @@
   "build_success": false,
   "build_errors": [
     {
-      "file": "src/App.tsx",
-      "line": 1,
-      "column": 1,
-      "code": "TS2349",
-      "message": "This expression is not callable.\nType 'String' has no call signatures.",
-      "raw": "src/App.tsx(1,1): error TS2349: This expression is not callable.\nType 'String' has no call signatures."
-    },
-    {
       "file": "src/index.tsx",
       "line": 1,
       "column": 1,
@@ -20,10 +12,10 @@
     {
       "file": "src/main.tsx",
       "line": 4,
-      "column": 8,
-      "code": "TS1192",
-      "message": "Module '\"/Users/home/development/gauntlet/threadwork/my-react-app/src/App\"' has no default export.",
-      "raw": "src/main.tsx(4,8): error TS1192: Module '\"/Users/home/development/gauntlet/threadwork/my-react-app/src/App\"' has no default export."
+      "column": 17,
+      "code": "TS2307",
+      "message": "Cannot find module './App.tsx' or its corresponding type declarations.",
+      "raw": "src/main.tsx(4,17): error TS2307: Cannot find module './App.tsx' or its corresponding type declarations."
     },
     {
       "file": "src/types/Habit.ts",

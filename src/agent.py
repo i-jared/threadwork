@@ -729,196 +729,6 @@ export default {
         # Log the full error message
         print(f"DEBUG: {str(e)}")
 
-# -------------------------
-# Workflow Execution
-# -------------------------
-
-@observe()
-async def execute_workflow(description: str):
-    """
-    Executes the workflow with Langfuse tracing in the following pattern:
-    1. Blueprint creation
-    2. Stub file generation (optional)
-    3. Planning
-    4. Initial splitting
-    5. Development loop
-    """
-    
-    try:
-        success = await create_react_app()
-        if success:
-            logger.info("✅ Vite React app setup completed")
-    except Exception as e:
-        logger.error(f"Workflow: Error creating React app: {str(e)}")
-        raise
-
-    os.makedirs('my-react-app/src/components', exist_ok=True)
-    os.makedirs('my-react-app/src/pages', exist_ok=True)
-    if os.path.exists('my-react-app/src/App.tsx'):
-        os.remove('my-react-app/src/App.tsx')
-
-    claude_config = {
-        "provider": "anthropic",
-        "api_key": os.getenv('ANTHROPIC_API_KEY'),
-        "max_tokens": 8192,
-        "model": "claude-3-5-sonnet-20241022"
-    }
-
-    gemini_config = {
-        "provider": "gemini",
-        "api_key": os.getenv('GEMINI_API_KEY'),
-        "max_tokens": 100000,
-        "model": "gemini-2.0-flash"
-    }
-
-    deepseek_config = {
-        "provider": "deepseek",
-        "api_key": os.getenv('DEEPSEEK_API_KEY'),
-        "max_tokens": 10000,
-        "model": "deepseek-reasoner"
-    }
-
-    default_config = gemini_config
-
-    project_config = {
-        "user_description": description,
-    }
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            # Generate complete blueprint
-            blueprint = await blueprint_agent(description, default_config, session)
-            
-            # Generate prop contracts
-            prop_contracts = await prop_contract_agent(blueprint, default_config, session)
-            
-            # Generate initial files
-            for file_info in blueprint["files"]:
-                try:
-                    code = await generate_file_code(file_info, blueprint, prop_contracts, default_config, session)
-                    await write_file(f"my-react-app/src/{file_info['path']}", code)
-                except Exception as e:
-                    logger.error(f"Failed to generate {file_info['path']}: {str(e)}")
-                    continue
-            
-            # Perform iterative build checks and fixes
-            build_success = await iterative_build_check(blueprint, prop_contracts, default_config, session)
-            if build_success:
-                logger.info("Successfully completed all build checks")
-            else:
-                logger.warning("Some build errors could not be fixed automatically")
-
-            # Generate prop contracts
-            prop_contracts = await prop_contract_agent(blueprint, default_config, session)
-            
-            # Optionally create stub files
-            if blueprint["validation"]["allLocalImportsExist"] and blueprint["validation"]["noCyclicalDependencies"]:
-                await create_stubs(blueprint)
-            
-            # Generate each file
-            for file_info in blueprint["files"]:
-                try:
-                    # Generate the code with prop contracts
-                    code = await generate_file_code(file_info, blueprint, prop_contracts, default_config, session)
-                    
-                    # Validate the generated code
-                    is_valid, issues = await validate_generated_code(code, file_info, blueprint)
-                    if not is_valid:
-                        logger.error(f"Code validation failed for {file_info['path']}")
-                        for issue in issues:
-                            logger.error(f"  - {issue}")
-                        continue
-                    
-                    # Process and install any npm imports
-                    await process_npm_imports(code, "my-react-app")
-                    
-                    # Write and validate the file
-                    success = await write_and_validate_file(file_info, code, blueprint)
-                    if success:
-                        logger.info(f"Successfully generated and validated {file_info['path']}")
-                    else:
-                        logger.error(f"Failed to generate or validate {file_info['path']}")
-                
-                except Exception as e:
-                    logger.error(f"Error processing file {file_info['path']}: {str(e)}")
-                    continue
-            
-            # Continue with existing workflow
-            plan = await planning_agent(description, default_config, session)
-            project_config["summary"] = plan["summary"]
-
-            # Initial splitting
-            components = await splitting_agent(plan, gemini_config, session)
-            
-            # Prepare initial config and develop main component
-            components["description"] = plan["description"]
-            config = prepare_component_config(components)
-            config["path"] = 'my-react-app/src/' + components["name"]
-    
-            asyncio.create_task(development_agent(config, project_config, default_config, session))
-    
-            # Process queue for components that need work
-            work_queue = components["parts"] 
-            
-            while work_queue:
-                current_batch = work_queue.copy()
-                work_queue.clear()
-                
-                # Process all current components concurrently
-                async with asyncio.TaskGroup() as tg:
-                    for component in current_batch:
-                        # Determine next steps
-                        route = await routing_agent(component["description"], gemini_config, session)
-                        
-                        if route == "detail":
-                            # Need more detail - send to expounding then splitting
-                            expanded = await expounding_agent(component, gemini_config, session)
-                            split_components = await splitting_agent(expanded, gemini_config, session)
-                            
-                            split_components["description"] = expanded["description"]
-                            config = prepare_component_config(split_components)
-                            tg.create_task(development_agent(config, project_config, default_config, session))
-                            work_queue.extend(split_components["parts"])
-                                
-                        elif route == "split":
-                            # Need to split - send to splitting
-                            split_components = await splitting_agent(component, gemini_config, session)
-                            
-                            split_components["description"] = component["description"]
-                            config = prepare_component_config(split_components)
-                            tg.create_task(development_agent(config, project_config, default_config, session))
-                            work_queue.extend(split_components["parts"])
-                        else:
-                            # Ready to write - send to development
-                            config = prepare_component_config(component)
-                            tg.create_task(development_agent(config, project_config, default_config, session))
-    
-        logger.info("Workflow: Execution completed successfully")
-        # Zip the react folder
-        output_filename = "project_files"
-        directory = 'my-react-app'
-
-        try:
-            # # Run post-react agent
-            # result = await post_react_agent(gemini_config, session)
-            # if result["build_success"]:
-            #     logger.info("✅ Build check completed successfully")
-            # else:
-            #     logger.info("❌ Build check failed")
-                
-            # Zip the react folder
-            shutil.make_archive(output_filename, 'zip', directory)
-            logger.info(f"Workflow: Successfully zipped react folder to {output_filename}.zip")
-            
-
-            
-        except Exception as e:
-            logger.error(f"Workflow: Error zipping react folder: {str(e)}")
-        
-    except Exception as e:
-        logger.error("Workflow: Execution failed")
-        logger.debug(f"Detailed error: {str(e)}")
-        raise
 
 async def blueprint_agent(input: str, config: dict, session: aiohttp.ClientSession) -> dict:
     """
@@ -1460,6 +1270,198 @@ async def iterative_build_check(blueprint: dict, prop_contracts: dict, config: d
     
     logger.warning(f"Reached maximum iterations ({max_iterations})")
     return False
+
+# -------------------------
+# Workflow Execution
+# -------------------------
+
+@observe()
+async def execute_workflow(description: str):
+    """
+    Executes the workflow with Langfuse tracing in the following pattern:
+    1. Blueprint creation
+    2. Stub file generation (optional)
+    3. Planning
+    4. Initial splitting
+    5. Development loop
+    """
+    
+    try:
+        success = await create_react_app()
+        if success:
+            logger.info("✅ Vite React app setup completed")
+    except Exception as e:
+        logger.error(f"Workflow: Error creating React app: {str(e)}")
+        raise
+
+    os.makedirs('my-react-app/src/components', exist_ok=True)
+    os.makedirs('my-react-app/src/pages', exist_ok=True)
+    if os.path.exists('my-react-app/src/App.tsx'):
+        os.remove('my-react-app/src/App.tsx')
+
+    claude_config = {
+        "provider": "anthropic",
+        "api_key": os.getenv('ANTHROPIC_API_KEY'),
+        "max_tokens": 8192,
+        "model": "claude-3-5-sonnet-20241022"
+    }
+
+    gemini_config = {
+        "provider": "gemini",
+        "api_key": os.getenv('GEMINI_API_KEY'),
+        "max_tokens": 100000,
+        "model": "gemini-2.0-flash"
+    }
+
+    deepseek_config = {
+        "provider": "deepseek",
+        "api_key": os.getenv('DEEPSEEK_API_KEY'),
+        "max_tokens": 10000,
+        "model": "deepseek-reasoner"
+    }
+
+    default_config = gemini_config
+
+    project_config = {
+        "user_description": description,
+    }
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Generate complete blueprint
+            blueprint = await blueprint_agent(description, default_config, session)
+            
+            # Generate prop contracts
+            prop_contracts = await prop_contract_agent(blueprint, default_config, session)
+            
+            # Generate initial files
+            for file_info in blueprint["files"]:
+                try:
+                    code = await generate_file_code(file_info, blueprint, prop_contracts, default_config, session)
+                    await write_file(f"my-react-app/src/{file_info['path']}", code)
+                except Exception as e:
+                    logger.error(f"Failed to generate {file_info['path']}: {str(e)}")
+                    continue
+            
+            # Perform iterative build checks and fixes
+            build_success = await iterative_build_check(blueprint, prop_contracts, default_config, session)
+            if build_success:
+                logger.info("Successfully completed all build checks")
+            else:
+                logger.warning("Some build errors could not be fixed automatically")
+
+            # Generate prop contracts
+            prop_contracts = await prop_contract_agent(blueprint, default_config, session)
+            
+            # Optionally create stub files
+            if blueprint["validation"]["allLocalImportsExist"] and blueprint["validation"]["noCyclicalDependencies"]:
+                await create_stubs(blueprint)
+            
+            # Generate each file
+            for file_info in blueprint["files"]:
+                try:
+                    # Generate the code with prop contracts
+                    code = await generate_file_code(file_info, blueprint, prop_contracts, default_config, session)
+                    
+                    # Validate the generated code
+                    is_valid, issues = await validate_generated_code(code, file_info, blueprint)
+                    if not is_valid:
+                        logger.error(f"Code validation failed for {file_info['path']}")
+                        for issue in issues:
+                            logger.error(f"  - {issue}")
+                        continue
+                    
+                    # Process and install any npm imports
+                    await process_npm_imports(code, "my-react-app")
+                    
+                    # Write and validate the file
+                    success = await write_and_validate_file(file_info, code, blueprint)
+                    if success:
+                        logger.info(f"Successfully generated and validated {file_info['path']}")
+                    else:
+                        logger.error(f"Failed to generate or validate {file_info['path']}")
+                
+                except Exception as e:
+                    logger.error(f"Error processing file {file_info['path']}: {str(e)}")
+                    continue
+            
+            # # Continue with existing workflow
+            # plan = await planning_agent(description, default_config, session)
+            # project_config["summary"] = plan["summary"]
+
+            # # Initial splitting
+            # components = await splitting_agent(plan, gemini_config, session)
+            
+            # # Prepare initial config and develop main component
+            # components["description"] = plan["description"]
+            # config = prepare_component_config(components)
+            # config["path"] = 'my-react-app/src/' + components["name"]
+    
+            # asyncio.create_task(development_agent(config, project_config, default_config, session))
+    
+            # # Process queue for components that need work
+            # work_queue = components["parts"] 
+            
+            # while work_queue:
+            #     current_batch = work_queue.copy()
+            #     work_queue.clear()
+                
+            #     # Process all current components concurrently
+            #     async with asyncio.TaskGroup() as tg:
+            #         for component in current_batch:
+            #             # Determine next steps
+            #             route = await routing_agent(component["description"], gemini_config, session)
+                        
+            #             if route == "detail":
+            #                 # Need more detail - send to expounding then splitting
+            #                 expanded = await expounding_agent(component, gemini_config, session)
+            #                 split_components = await splitting_agent(expanded, gemini_config, session)
+                            
+            #                 split_components["description"] = expanded["description"]
+            #                 config = prepare_component_config(split_components)
+            #                 tg.create_task(development_agent(config, project_config, default_config, session))
+            #                 work_queue.extend(split_components["parts"])
+                                
+            #             elif route == "split":
+            #                 # Need to split - send to splitting
+            #                 split_components = await splitting_agent(component, gemini_config, session)
+                            
+            #                 split_components["description"] = component["description"]
+            #                 config = prepare_component_config(split_components)
+            #                 tg.create_task(development_agent(config, project_config, default_config, session))
+            #                 work_queue.extend(split_components["parts"])
+            #             else:
+            #                 # Ready to write - send to development
+            #                 config = prepare_component_config(component)
+            #                 tg.create_task(development_agent(config, project_config, default_config, session))
+    
+        logger.info("Workflow: Execution completed successfully")
+        # Zip the react folder
+        output_filename = "project_files"
+        directory = 'my-react-app'
+
+        try:
+            # # Run post-react agent
+            # result = await post_react_agent(gemini_config, session)
+            # if result["build_success"]:
+            #     logger.info("✅ Build check completed successfully")
+            # else:
+            #     logger.info("❌ Build check failed")
+                
+            # Zip the react folder
+            shutil.make_archive(output_filename, 'zip', directory)
+            logger.info(f"Workflow: Successfully zipped react folder to {output_filename}.zip")
+            
+
+            
+        except Exception as e:
+            logger.error(f"Workflow: Error zipping react folder: {str(e)}")
+        
+    except Exception as e:
+        logger.error("Workflow: Execution failed")
+        logger.debug(f"Detailed error: {str(e)}")
+        raise
+
 
 # -------------------------
 # Main Entrypoint

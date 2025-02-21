@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 import logging
 import json
+import re
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -43,37 +44,37 @@ async def run_build_check() -> dict:
         )
         stdout, stderr = await proc.communicate()
         build_output = stdout.decode().strip() if stdout else ""
-        print("jl:", build_output, "jl")
+        
+        # Define regex pattern for TypeScript errors
+        ts_error_regex = re.compile(
+            r'^(?P<file>.*)\((?P<line>\d+),(?P<column>\d+)\): error (?P<code>TS\d+): (?P<message>.*)$'
+        )
+        
         # Parse TypeScript errors into structured format
         errors = []
+        current_error = None
+        
         for line in build_output.split('\n'):
+            line = line.strip()
             if not line:
                 continue
-            print("jl2:", line, "jl")
-            try:
-                # Parse TypeScript error format: "file(line,col): error CODE: message"
-                file_loc, error_details = line.split(': error ', 1)
-                error_code, error_message = error_details.split(': ', 1)
                 
-                # Parse file location: "file(line,col)"
-                file_path = file_loc[:file_loc.find('(')]
-                line_col = file_loc[file_loc.find('(')+1:file_loc.find(')')].split(',')
-                line_num = int(line_col[0])
-                col_num = int(line_col[1])
-                
-                error_obj = {
-                    "file": file_path,
-                    "line": line_num,
-                    "column": col_num,
-                    "code": error_code,
-                    "message": error_message,
+            match = ts_error_regex.match(line)
+            if match:
+                # This is a brand-new error line
+                current_error = {
+                    "file": match.group('file'),
+                    "line": int(match.group('line')),
+                    "column": int(match.group('column')),
+                    "code": match.group('code'),
+                    "message": match.group('message'),
                     "raw": line
                 }
-                print("jl3:", error_obj, "jl")
-                errors.append(error_obj)
-            except Exception as e:
-                logger.warning(f"Failed to parse error line: {line}, error: {str(e)}")
-                continue
+                errors.append(current_error)
+            elif current_error:
+                # Append continuation lines to the current error
+                current_error["message"] += "\n" + line
+                current_error["raw"] += "\n" + line
         
         if errors:
             logger.warning(f"Build completed with errors: {len(errors)} errors found")

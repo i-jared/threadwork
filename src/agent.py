@@ -1298,10 +1298,16 @@ async def write_and_validate_file(file_info: dict, code: str, blueprint: dict) -
         logger.error(f"Failed to write or validate file {path}: {str(e)}")
         return False
 
-async def parse_build_errors(error_output: str) -> list[dict]:
+async def parse_build_errors(error_output: str | list) -> list[dict]:
     """
     Parses build error output into structured format.
     Returns list of error objects with file, message, and type.
+    
+    Args:
+        error_output: Either a string of error messages or a list of error messages
+        
+    Returns:
+        list[dict]: List of parsed error objects
     """
     errors = []
     
@@ -1310,9 +1316,16 @@ async def parse_build_errors(error_output: str) -> list[dict]:
     module_error_pattern = r"Cannot find module '(?P<module>[^']+)'"
     prop_error_pattern = r"Property '(?P<prop>[^']+)' does not exist on type"
     
-    for line in error_output.split('\n'):
+    # Handle both string and list inputs
+    lines = error_output.split('\n') if isinstance(error_output, str) else error_output
+    
+    for line in lines:
         error = {}
         
+        # Skip empty lines or non-string items
+        if not line or not isinstance(line, str):
+            continue
+            
         # Match TypeScript errors
         ts_match = re.match(ts_error_pattern, line)
         if ts_match:

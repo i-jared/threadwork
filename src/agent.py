@@ -737,19 +737,13 @@ export default {
 async def execute_workflow(description: str):
     """
     Executes the workflow with Langfuse tracing in the following pattern:
-    1. Planning
-    2. Initial splitting
-    3. Loop of:
-       - Development (for each split part)
-       - Routing
-       - Expounding (if needed) -> Splitting
-       - Splitting (if needed)
+    1. Blueprint creation
+    2. Stub file generation (optional)
+    3. Planning
+    4. Initial splitting
+    5. Development loop
     """
     
-    # Create tmp directories
-    # os.makedirs('tmp/pages', exist_ok=True)
-    # os.makedirs('tmp/components', exist_ok=True)
-        
     try:
         success = await create_react_app()
         if success:
@@ -758,10 +752,10 @@ async def execute_workflow(description: str):
         logger.error(f"Workflow: Error creating React app: {str(e)}")
         raise
 
-    os.makedirs('my-react-app/src/components')
-    os.makedirs('my-react-app/src/pages')
-    os.remove('my-react-app/src/App.tsx')
-
+    os.makedirs('my-react-app/src/components', exist_ok=True)
+    os.makedirs('my-react-app/src/pages', exist_ok=True)
+    if os.path.exists('my-react-app/src/App.tsx'):
+        os.remove('my-react-app/src/App.tsx')
 
     claude_config = {
         "provider": "anthropic",
@@ -792,7 +786,64 @@ async def execute_workflow(description: str):
     
     try:
         async with aiohttp.ClientSession() as session:
-            # Initial planning
+            # Generate complete blueprint
+            blueprint = await blueprint_agent(description, default_config, session)
+            
+            # Generate prop contracts
+            prop_contracts = await prop_contract_agent(blueprint, default_config, session)
+            
+            # Generate initial files
+            for file_info in blueprint["files"]:
+                try:
+                    code = await generate_file_code(file_info, blueprint, prop_contracts, claude_config, session)
+                    await write_file(f"my-react-app/src/{file_info['path']}", code)
+                except Exception as e:
+                    logger.error(f"Failed to generate {file_info['path']}: {str(e)}")
+                    continue
+            
+            # Perform iterative build checks and fixes
+            build_success = await iterative_build_check(blueprint, prop_contracts, claude_config, session)
+            if build_success:
+                logger.info("Successfully completed all build checks")
+            else:
+                logger.warning("Some build errors could not be fixed automatically")
+
+            # Generate prop contracts
+            prop_contracts = await prop_contract_agent(blueprint, default_config, session)
+            
+            # Optionally create stub files
+            if blueprint["validation"]["allLocalImportsExist"] and blueprint["validation"]["noCyclicalDependencies"]:
+                await create_stubs(blueprint)
+            
+            # Generate each file
+            for file_info in blueprint["files"]:
+                try:
+                    # Generate the code with prop contracts
+                    code = await generate_file_code(file_info, blueprint, prop_contracts, claude_config, session)
+                    
+                    # Validate the generated code
+                    is_valid, issues = await validate_generated_code(code, file_info, blueprint)
+                    if not is_valid:
+                        logger.error(f"Code validation failed for {file_info['path']}")
+                        for issue in issues:
+                            logger.error(f"  - {issue}")
+                        continue
+                    
+                    # Process and install any npm imports
+                    await process_npm_imports(code, "my-react-app")
+                    
+                    # Write and validate the file
+                    success = await write_and_validate_file(file_info, code, blueprint)
+                    if success:
+                        logger.info(f"Successfully generated and validated {file_info['path']}")
+                    else:
+                        logger.error(f"Failed to generate or validate {file_info['path']}")
+                
+                except Exception as e:
+                    logger.error(f"Error processing file {file_info['path']}: {str(e)}")
+                    continue
+            
+            # Continue with existing workflow
             plan = await planning_agent(description, default_config, session)
             project_config["summary"] = plan["summary"]
 
@@ -868,6 +919,533 @@ async def execute_workflow(description: str):
         logger.error("Workflow: Execution failed")
         logger.debug(f"Detailed error: {str(e)}")
         raise
+
+async def blueprint_agent(input: str, config: dict, session: aiohttp.ClientSession) -> dict:
+    """
+    Blueprint Agent:
+    Creates a complete file list with detailed information about each file's
+    imports, exports, and purpose.
+
+    Args:
+        input: Project description and requirements
+        config: API configuration
+        session: aiohttp session
+
+    Returns:
+        dict: Complete blueprint of all files
+    """
+    logger.info("Blueprint Agent: Starting blueprint creation")
+    
+    prompt = f"""Create a complete blueprint of all files needed for this React TypeScript project.
+    For each file, provide:
+    - Exact file path (relative to src/)
+    - Short summary of the file's purpose (1-2 sentences)
+    - List of exports (components, functions, types, etc.)
+    - List of imports (both npm packages and local files)
+
+    Project Description:
+    ```
+    {input}
+    ```
+
+    Return EXACTLY in this JSON format with NO additional text:
+    {{
+        "files": [
+            {{
+                "path": "str: relative path from src/ (e.g., components/Header.tsx)",
+                "summary": "str: brief description of file purpose",
+                "exports": ["list", "of", "exports"],
+                "imports": {{
+                    "npm": ["list", "of", "npm", "packages"],
+                    "local": ["list", "of", "local", "file", "imports"]
+                }}
+            }}
+        ],
+        "validation": {{
+            "allLocalImportsExist": true,
+            "noCyclicalDependencies": true
+        }}
+    }}"""
+
+    try:
+        config["fx"] = "blueprint"
+        api_output = await make_api_call(prompt, config, session)
+        result = parse_json_response(api_output["content"])
+        
+        # Validate that all local imports reference existing files
+        all_files = {file["path"] for file in result["files"]}
+        for file in result["files"]:
+            for local_import in file["imports"]["local"]:
+                if local_import not in all_files:
+                    result["validation"]["allLocalImportsExist"] = False
+                    logger.warning(f"Blueprint Agent: Local import {local_import} not found in file list")
+        
+        # Basic cycle detection
+        def has_cycle(graph, start, visited=None, rec_stack=None):
+            if visited is None:
+                visited = set()
+            if rec_stack is None:
+                rec_stack = set()
+            
+            visited.add(start)
+            rec_stack.add(start)
+            
+            for neighbor in graph[start]:
+                if neighbor not in visited:
+                    if has_cycle(graph, neighbor, visited, rec_stack):
+                        return True
+                elif neighbor in rec_stack:
+                    return True
+            
+            rec_stack.remove(start)
+            return False
+        
+        # Build dependency graph
+        dep_graph = {file["path"]: set(file["imports"]["local"]) for file in result["files"]}
+        
+        # Check for cycles
+        result["validation"]["noCyclicalDependencies"] = not any(
+            has_cycle(dep_graph, start) for start in dep_graph
+        )
+        
+        if not result["validation"]["noCyclicalDependencies"]:
+            logger.warning("Blueprint Agent: Detected cyclical dependencies in file structure")
+        
+        logger.info("Blueprint Agent: Successfully created and validated blueprint")
+        return result
+
+    except Exception as e:
+        logger.error("Blueprint Agent: Error encountered")
+        logger.debug(f"Detailed error: {str(e)}")
+        raise
+
+async def create_stubs(blueprint: dict) -> None:
+    """
+    Creates stub files for all files in the blueprint.
+    """
+    logger.info("Creating stub files from blueprint")
+    
+    for file in blueprint["files"]:
+        path = f"my-react-app/src/{file['path']}"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        
+        # Generate minimal stub content
+        exports = file["exports"]
+        imports = file["imports"]
+        
+        content = ["import React from 'react';"]
+        
+        # Add npm imports
+        for npm_import in imports["npm"]:
+            content.append(f"import {npm_import} from '{npm_import}';")
+        
+        # Add local imports
+        for local_import in imports["local"]:
+            content.append(f"import {{ {local_import} }} from './{local_import}';")
+        
+        # Add exports
+        for export in exports:
+            if export.endswith("Props"):
+                content.append(f"\ninterface {export} {{\n  // TODO: Add props\n}}")
+            else:
+                content.append(f"\nexport function {export}() {{\n  return (\n    <div>TODO: Implement {export}</div>\n  );\n}}")
+        
+        # Write stub file
+        try:
+            with open(path, "w") as f:
+                f.write("\n".join(content))
+            logger.info(f"Created stub file: {path}")
+        except Exception as e:
+            logger.error(f"Failed to create stub file {path}: {str(e)}")
+
+async def prop_contract_agent(blueprint: dict, config: dict, session: aiohttp.ClientSession) -> dict:
+    """
+    Prop Contract Agent:
+    Creates a central contract defining all component props.
+    
+    Args:
+        blueprint: Complete blueprint of all files
+        config: API configuration
+        session: aiohttp session
+    
+    Returns:
+        dict: Prop contracts for all components
+    """
+    logger.info("Prop Contract Agent: Starting contract creation")
+    
+    # Filter for component files from blueprint
+    component_files = [f for f in blueprint["files"] if f["path"].startswith("components/") or f["path"].endswith(".tsx")]
+    
+    prompt = f"""Create a complete TypeScript prop contract for all React components in this project.
+    For each component, define its props interface with proper TypeScript types.
+
+    Component Files:
+    ```
+    {json.dumps(component_files, indent=2)}
+    ```
+
+    Return EXACTLY in this JSON format with NO additional text:
+    {{
+        "contracts": [
+            {{
+                "componentName": "str: name of the component",
+                "propsInterface": "str: complete TypeScript interface definition",
+                "path": "str: path to component file",
+                "required": ["list", "of", "required", "prop", "names"],
+                "optional": ["list", "of", "optional", "prop", "names"]
+            }}
+        ],
+        "shared": {{
+            "types": ["list of shared type definitions"],
+            "interfaces": ["list of shared interface definitions"]
+        }}
+    }}"""
+
+    try:
+        config["fx"] = "prop_contract"
+        api_output = await make_api_call(prompt, config, session)
+        result = parse_json_response(api_output["content"])
+        
+        # Validate contracts match blueprint components
+        blueprint_components = {f["path"]: f["exports"] for f in component_files}
+        for contract in result["contracts"]:
+            if contract["path"] not in blueprint_components:
+                logger.warning(f"Prop Contract Agent: Contract for unknown component {contract['path']}")
+            elif f"{contract['componentName']}Props" not in blueprint_components[contract["path"]]:
+                logger.warning(f"Prop Contract Agent: Missing Props interface in blueprint for {contract['componentName']}")
+        
+        logger.info("Prop Contract Agent: Successfully created prop contracts")
+        return result
+
+    except Exception as e:
+        logger.error("Prop Contract Agent: Error encountered")
+        logger.debug(f"Detailed error: {str(e)}")
+        raise
+
+async def validate_prop_contract(code: str, contract: dict) -> tuple[bool, list[str]]:
+    """
+    Validates that generated code adheres to the prop contract.
+    Returns (is_valid, list_of_issues).
+    """
+    issues = []
+    
+    # Extract props interface from code
+    interface_pattern = rf"interface\s+{contract['componentName']}Props\s*{{([^}}]+)}}"
+    interface_match = re.search(interface_pattern, code)
+    
+    if not interface_match:
+        issues.append(f"Missing props interface for {contract['componentName']}")
+        return False, issues
+    
+    interface_content = interface_match.group(1)
+    
+    # Check required props
+    for prop in contract["required"]:
+        if not re.search(rf"{prop}\s*:", interface_content):
+            issues.append(f"Missing required prop: {prop}")
+    
+    # Check for extra props
+    prop_pattern = r"(\w+)\s*[?]?\s*:"
+    found_props = set(re.findall(prop_pattern, interface_content))
+    allowed_props = set(contract["required"] + contract["optional"])
+    
+    extra_props = found_props - allowed_props
+    if extra_props:
+        issues.append(f"Unexpected props found: {', '.join(extra_props)}")
+    
+    return len(issues) == 0, issues
+
+async def generate_file_code(file_info: dict, blueprint: dict, prop_contracts: dict, config: dict, session: aiohttp.ClientSession) -> str:
+    """
+    Generates code for a single file based on the blueprint specifications and prop contracts.
+    """
+    logger.info(f"Generating code for file: {file_info['path']}")
+    
+    # Find matching prop contract if it exists
+    contract = next(
+        (c for c in prop_contracts.get("contracts", []) if c["path"] == file_info["path"]),
+        None
+    )
+    
+    contract_info = ""
+    if contract:
+        contract_info = f"""
+        Props Interface:
+        {contract['propsInterface']}
+        
+        Required Props: {', '.join(contract['required'])}
+        Optional Props: {', '.join(contract['optional'])}
+        """
+    
+    prompt = f"""Generate the complete code for this React TypeScript file.
+    Strictly follow these specifications:
+
+    File Path: {file_info['path']}
+    Summary: {file_info['summary']}
+    Required Exports: {', '.join(file_info['exports'])}
+    
+    Allowed Imports:
+    NPM Packages: {', '.join(file_info['imports']['npm'])}
+    Local Files: {', '.join(file_info['imports']['local'])}
+
+    {contract_info}
+
+    CRITICAL REQUIREMENTS:
+    1. Use ONLY the specified imports - no additional local imports
+    2. Implement ALL specified exports
+    3. Use Tailwind CSS for styling
+    4. Follow React + TypeScript best practices
+    5. Include JSDoc comments for components and functions
+    6. Implement props interface EXACTLY as specified
+    7. Use all required props in the component implementation
+
+    Return ONLY the complete file code, no explanations or markdown formatting.
+    """
+
+    try:
+        config["fx"] = "file_generation"
+        api_output = await make_api_call(prompt, config, session)
+        code = api_output["content"]
+        
+        # Validate prop contract if it exists
+        if contract:
+            is_valid, issues = await validate_prop_contract(code, contract)
+            if not is_valid:
+                logger.error(f"Prop contract validation failed for {file_info['path']}")
+                for issue in issues:
+                    logger.error(f"  - {issue}")
+                raise ValueError(f"Generated code does not match prop contract: {', '.join(issues)}")
+        
+        return code
+    except Exception as e:
+        logger.error(f"File generation failed for {file_info['path']}: {str(e)}")
+        raise
+
+async def validate_generated_code(code: str, file_info: dict, blueprint: dict) -> tuple[bool, list[str]]:
+    """
+    Validates the generated code against the blueprint specifications.
+    Returns (is_valid, list_of_issues).
+    """
+    issues = []
+    
+    # Extract imports using regex
+    import_pattern = r"import\s+(?:{[^}]*}|\w+)\s+from\s+'([^']+)';"
+    found_imports = re.findall(import_pattern, code)
+    
+    # Check for unauthorized imports
+    allowed_imports = set(file_info['imports']['npm'] + file_info['imports']['local'] + ['react'])
+    for imp in found_imports:
+        if not any(imp.startswith(allowed) for allowed in allowed_imports):
+            issues.append(f"Unauthorized import: {imp}")
+    
+    # Extract exports using regex
+    export_pattern = r"export\s+(?:interface|type|function|const|class)\s+(\w+)"
+    found_exports = re.findall(export_pattern, code)
+    
+    # Check for missing exports
+    required_exports = set(file_info['exports'])
+    found_exports_set = set(found_exports)
+    for exp in required_exports:
+        if exp not in found_exports_set:
+            issues.append(f"Missing export: {exp}")
+    
+    return len(issues) == 0, issues
+
+async def process_npm_imports(code: str, project_dir: str) -> None:
+    """
+    Processes npm imports in the code and installs missing packages.
+    """
+    # Extract all npm imports
+    import_pattern = r"import\s+(?:{[^}]*}|\w+)\s+from\s+'(?!\.|\/)([^']+)';"
+    npm_imports = re.findall(import_pattern, code)
+    
+    for package in npm_imports:
+        if package != 'react':  # Skip react as it's already installed
+            try:
+                logger.info(f"Installing npm package: {package}")
+                subprocess.run(
+                    f"bun add {package}",
+                    shell=True,
+                    check=True,
+                    cwd=project_dir
+                )
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Failed to install npm package {package}: {str(e)}")
+                raise
+
+async def write_and_validate_file(file_info: dict, code: str, blueprint: dict) -> bool:
+    """
+    Writes the file to disk and performs build validation.
+    Returns True if successful, False otherwise.
+    """
+    try:
+        # Write the file
+        path = f"my-react-app/src/{file_info['path']}"
+        await write_file(path, code)
+        
+        # Run build check
+        build_result = await run_build_check()
+        
+        if not build_result["build_success"]:
+            logger.error(f"Build failed for {path}")
+            logger.error(f"Build errors: {build_result['build_errors']}")
+            return False
+            
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to write or validate file {path}: {str(e)}")
+        return False
+
+async def parse_build_errors(error_output: str) -> list[dict]:
+    """
+    Parses build error output into structured format.
+    Returns list of error objects with file, message, and type.
+    """
+    errors = []
+    
+    # Common TypeScript error patterns
+    ts_error_pattern = r"(?P<file>[^:]+):(?P<line>\d+):(?P<col>\d+) - error TS(?P<code>\d+): (?P<message>.+)"
+    module_error_pattern = r"Cannot find module '(?P<module>[^']+)'"
+    prop_error_pattern = r"Property '(?P<prop>[^']+)' does not exist on type"
+    
+    for line in error_output.split('\n'):
+        error = {}
+        
+        # Match TypeScript errors
+        ts_match = re.match(ts_error_pattern, line)
+        if ts_match:
+            error = {
+                'file': ts_match.group('file'),
+                'type': 'typescript',
+                'code': ts_match.group('code'),
+                'message': ts_match.group('message'),
+                'line': int(ts_match.group('line')),
+                'column': int(ts_match.group('col'))
+            }
+        
+        # Check for specific error types
+        if module_match := re.search(module_error_pattern, line):
+            error['subtype'] = 'module_not_found'
+            error['module'] = module_match.group('module')
+        elif prop_match := re.search(prop_error_pattern, line):
+            error['subtype'] = 'invalid_prop'
+            error['prop'] = prop_match.group('prop')
+            
+        if error:
+            errors.append(error)
+            
+    return errors
+
+async def fix_agent(error: dict, file_content: str, blueprint: dict, prop_contracts: dict, config: dict, session: aiohttp.ClientSession) -> str:
+    """
+    Generates fixes for build errors based on error type.
+    Returns updated file content.
+    """
+    logger.info(f"Fix Agent: Attempting to fix error in {error['file']}")
+    
+    # Get relevant file info from blueprint
+    file_info = next((f for f in blueprint["files"] if f["path"].endswith(error["file"])), None)
+    if not file_info:
+        raise ValueError(f"Could not find file info for {error['file']} in blueprint")
+    
+    # Get prop contract if it exists
+    contract = next(
+        (c for c in prop_contracts.get("contracts", []) if c["path"] == file_info["path"]),
+        None
+    )
+    
+    prompt = f"""Fix the following error in the React TypeScript file:
+
+    Error: {error['message']}
+    File: {error['file']}
+    Type: {error.get('type')}
+    Subtype: {error.get('subtype', 'unknown')}
+
+    Current File Content:
+    ```typescript
+    {file_content}
+    ```
+
+    Blueprint Specifications:
+    - Exports: {', '.join(file_info['exports'])}
+    - Allowed NPM Imports: {', '.join(file_info['imports']['npm'])}
+    - Allowed Local Imports: {', '.join(file_info['imports']['local'])}
+    
+    {f'''Prop Contract:
+    {contract['propsInterface']}
+    Required Props: {', '.join(contract['required'])}
+    Optional Props: {', '.join(contract['optional'])}''' if contract else ''}
+
+    Return ONLY the complete fixed file content, no explanations.
+    """
+
+    try:
+        config["fx"] = "fix"
+        api_output = await make_api_call(prompt, config, session)
+        fixed_code = api_output["content"]
+        
+        # Validate the fixed code
+        is_valid, issues = await validate_generated_code(fixed_code, file_info, blueprint)
+        if not is_valid:
+            raise ValueError(f"Fixed code validation failed: {', '.join(issues)}")
+            
+        if contract:
+            is_valid, issues = await validate_prop_contract(fixed_code, contract)
+            if not is_valid:
+                raise ValueError(f"Fixed code prop contract validation failed: {', '.join(issues)}")
+        
+        return fixed_code
+        
+    except Exception as e:
+        logger.error(f"Fix Agent: Failed to fix error: {str(e)}")
+        raise
+
+async def iterative_build_check(blueprint: dict, prop_contracts: dict, config: dict, session: aiohttp.ClientSession, max_iterations: int = 3) -> bool:
+    """
+    Performs iterative build checks and fixes errors.
+    Returns True if all errors are fixed or max iterations reached.
+    """
+    logger.info("Starting iterative build check")
+    
+    for iteration in range(max_iterations):
+        logger.info(f"Build iteration {iteration + 1}/{max_iterations}")
+        
+        # Run build check
+        build_result = await run_build_check()
+        
+        if build_result["build_success"]:
+            logger.info("Build successful!")
+            return True
+            
+        # Parse build errors
+        errors = await parse_build_errors(build_result["build_errors"])
+        
+        if not errors:
+            logger.warning("No parseable errors found in build output")
+            return False
+            
+        # Try to fix each error
+        for error in errors:
+            try:
+                # Read current file content
+                file_path = f"my-react-app/src/{error['file']}"
+                async with aiofiles.open(file_path, 'r') as f:
+                    current_content = await f.read()
+                
+                # Get fixed content
+                fixed_content = await fix_agent(error, current_content, blueprint, prop_contracts, config, session)
+                
+                # Write fixed content
+                await write_file(file_path, fixed_content)
+                logger.info(f"Applied fix for {error['file']}")
+                
+            except Exception as e:
+                logger.error(f"Failed to fix error in {error['file']}: {str(e)}")
+                continue
+    
+    logger.warning(f"Reached maximum iterations ({max_iterations})")
+    return False
 
 # -------------------------
 # Main Entrypoint

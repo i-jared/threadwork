@@ -795,14 +795,14 @@ async def execute_workflow(description: str):
             # Generate initial files
             for file_info in blueprint["files"]:
                 try:
-                    code = await generate_file_code(file_info, blueprint, prop_contracts, claude_config, session)
+                    code = await generate_file_code(file_info, blueprint, prop_contracts, default_config, session)
                     await write_file(f"my-react-app/src/{file_info['path']}", code)
                 except Exception as e:
                     logger.error(f"Failed to generate {file_info['path']}: {str(e)}")
                     continue
             
             # Perform iterative build checks and fixes
-            build_success = await iterative_build_check(blueprint, prop_contracts, claude_config, session)
+            build_success = await iterative_build_check(blueprint, prop_contracts, default_config, session)
             if build_success:
                 logger.info("Successfully completed all build checks")
             else:
@@ -819,7 +819,7 @@ async def execute_workflow(description: str):
             for file_info in blueprint["files"]:
                 try:
                     # Generate the code with prop contracts
-                    code = await generate_file_code(file_info, blueprint, prop_contracts, claude_config, session)
+                    code = await generate_file_code(file_info, blueprint, prop_contracts, default_config, session)
                     
                     # Validate the generated code
                     is_valid, issues = await validate_generated_code(code, file_info, blueprint)
@@ -855,7 +855,7 @@ async def execute_workflow(description: str):
             config = prepare_component_config(components)
             config["path"] = 'my-react-app/src/' + components["name"]
     
-            asyncio.create_task(development_agent(config, project_config, claude_config, session))
+            asyncio.create_task(development_agent(config, project_config, default_config, session))
     
             # Process queue for components that need work
             work_queue = components["parts"] 
@@ -877,7 +877,7 @@ async def execute_workflow(description: str):
                             
                             split_components["description"] = expanded["description"]
                             config = prepare_component_config(split_components)
-                            tg.create_task(development_agent(config, project_config, claude_config, session))
+                            tg.create_task(development_agent(config, project_config, default_config, session))
                             work_queue.extend(split_components["parts"])
                                 
                         elif route == "split":
@@ -886,12 +886,12 @@ async def execute_workflow(description: str):
                             
                             split_components["description"] = component["description"]
                             config = prepare_component_config(split_components)
-                            tg.create_task(development_agent(config, project_config, claude_config, session))
+                            tg.create_task(development_agent(config, project_config, default_config, session))
                             work_queue.extend(split_components["parts"])
                         else:
                             # Ready to write - send to development
                             config = prepare_component_config(component)
-                            tg.create_task(development_agent(config, project_config, claude_config, session))
+                            tg.create_task(development_agent(config, project_config, default_config, session))
     
         logger.info("Workflow: Execution completed successfully")
         # Zip the react folder
@@ -980,7 +980,7 @@ async def blueprint_agent(input: str, config: dict, session: aiohttp.ClientSessi
                     result["validation"]["allLocalImportsExist"] = False
                     logger.warning(f"Blueprint Agent: Local import {local_import} not found in file list")
         
-        # Basic cycle detection
+        # Basic cycle detection with safe neighbor lookup
         def has_cycle(graph, start, visited=None, rec_stack=None):
             if visited is None:
                 visited = set()
@@ -990,7 +990,8 @@ async def blueprint_agent(input: str, config: dict, session: aiohttp.ClientSessi
             visited.add(start)
             rec_stack.add(start)
             
-            for neighbor in graph[start]:
+            # Only iterate over neighbors that exist in the graph
+            for neighbor in graph.get(start, []):
                 if neighbor not in visited:
                     if has_cycle(graph, neighbor, visited, rec_stack):
                         return True
@@ -1003,9 +1004,9 @@ async def blueprint_agent(input: str, config: dict, session: aiohttp.ClientSessi
         # Build dependency graph
         dep_graph = {file["path"]: set(file["imports"]["local"]) for file in result["files"]}
         
-        # Check for cycles
+        # Check for cycles only among existing files
         result["validation"]["noCyclicalDependencies"] = not any(
-            has_cycle(dep_graph, start) for start in dep_graph
+            has_cycle(dep_graph, start) for start in dep_graph if start in all_files
         )
         
         if not result["validation"]["noCyclicalDependencies"]:

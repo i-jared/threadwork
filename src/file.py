@@ -1,17 +1,21 @@
 import aiofiles
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 async def write_file(filename: str, content: str):
     """
-    Asynchronously writes content to a file.
+    Asynchronously writes content to a file, creating directories if needed.
     
     Args:
         filename: Path to the file to write
         content: Content to write to the file
     """
     try:
+        # Create directories if they don't exist
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        
         async with aiofiles.open(filename, mode='w') as f:
             await f.write(content)
         logger.info(f"Successfully wrote file: {filename}")

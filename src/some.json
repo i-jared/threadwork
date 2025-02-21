@@ -1,3 +1,29 @@
 {
-  "build_success": false
+  "build_success": false,
+  "build_errors": [
+    {
+      "file": "src/App.tsx",
+      "line": 1,
+      "column": 1,
+      "code": "TS2349",
+      "message": "This expression is not callable.",
+      "raw": "src/App.tsx(1,1): error TS2349: This expression is not callable."
+    },
+    {
+      "file": "src/main.tsx",
+      "line": 4,
+      "column": 8,
+      "code": "TS1192",
+      "message": "Module '\"/Users/home/development/gauntlet/threadwork/my-react-app/src/App\"' has no default export.",
+      "raw": "src/main.tsx(4,8): error TS1192: Module '\"/Users/home/development/gauntlet/threadwork/my-react-app/src/App\"' has no default export."
+    },
+    {
+      "file": "src/types/Habit.ts",
+      "line": 1,
+      "column": 1,
+      "code": "TS2349",
+      "message": "This expression is not callable.",
+      "raw": "src/types/Habit.ts(1,1): error TS2349: This expression is not callable."
+    }
+  ]
 }

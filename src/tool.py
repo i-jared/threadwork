@@ -20,7 +20,7 @@ async def run_build_check() -> dict:
     result = {}
 
     # Define the React app project directory
-    project_dir = Path("test/my-react-app")
+    project_dir = Path("my-react-app")
     if not project_dir.exists():
         error_msg = f"React app directory '{project_dir}' does not exist."
         logger.error(error_msg)
@@ -43,14 +43,13 @@ async def run_build_check() -> dict:
         )
         stdout, stderr = await proc.communicate()
         build_output = stdout.decode().strip() if stdout else ""
-        build_errors = stderr.decode().strip() if stderr else stdout.decode().strip()
-        print("jl:", build_errors, "jl")
+        print("jl:", build_output, "jl")
         # Parse TypeScript errors into structured format
         errors = []
         for line in build_output.split('\n'):
             if not line:
                 continue
-                
+            print("jl2:", line, "jl")
             try:
                 # Parse TypeScript error format: "file(line,col): error CODE: message"
                 file_loc, error_details = line.split(': error ', 1)
@@ -70,6 +69,7 @@ async def run_build_check() -> dict:
                     "message": error_message,
                     "raw": line
                 }
+                print("jl3:", error_obj, "jl")
                 errors.append(error_obj)
             except Exception as e:
                 logger.warning(f"Failed to parse error line: {line}, error: {str(e)}")
@@ -78,6 +78,7 @@ async def run_build_check() -> dict:
         if errors:
             logger.warning(f"Build completed with errors: {len(errors)} errors found")
             result["build_success"] = False
+            result["build_errors"] = errors
             # Save errors to JSON file
             with open('src/some.json', 'w') as f:
                 json.dump(result, f, indent=2)

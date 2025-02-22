@@ -280,7 +280,7 @@ async def development_agent(input: dict, project_config: dict, config: dict, ses
     {contract_info}
 
     {
-    'Available components and their purposes:\n' + '\n'.join(component_descriptions) if component_descriptions else 
+    'Available components and their purposes:' + ''.join(component_descriptions) if component_descriptions else 
     ''
     }
 
@@ -671,48 +671,98 @@ def prepare_component_config(components: dict) -> dict:
 async def create_react_app():
     """Creates a new Vite React-TypeScript project with initial setup"""
     try:        
+        logger.info("Starting create_react_app process...")
+        
+        # Clean up existing directory if it exists
+        if os.path.exists("my-react-app"):
+            logger.info("Found existing my-react-app directory, attempting to remove...")
+            try:
+                shutil.rmtree("my-react-app")
+                logger.info("✅ Cleaned up existing my-react-app directory")
+            except Exception as e:
+                logger.error(f"❌ Failed to remove existing directory: {str(e)}")
+                raise
+        
         # Create the React app using bun
-        subprocess.run(
-            "bun create vite my-react-app --template react-ts",
-            shell=True,
-            check=True,
-        )
-        logger.info("✅ React app created successfully")
+        logger.info("Creating new Vite React app with bun...")
+        try:
+            result = subprocess.run(
+                "bun create vite my-react-app --template react-ts",
+                shell=True,
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            logger.info("✅ React app created successfully")
+            logger.debug(f"Create command output: {result.stdout}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"❌ Failed to create React app: {str(e)}")
+            logger.error(f"Command output: {e.stdout}")
+            logger.error(f"Error output: {e.stderr}")
+            raise
         
         # Install dependencies
         app_dir = Path("my-react-app")
-        subprocess.run(
-            "bun install",
-            shell=True,
-            check=True,
-            cwd=app_dir
-        )
-        logger.info("✅ Base dependencies installed")
+        logger.info(f"Installing base dependencies in {app_dir}...")
+        try:
+            result = subprocess.run(
+                "bun install",
+                shell=True,
+                check=True,
+                cwd=app_dir,
+                capture_output=True,
+                text=True
+            )
+            logger.info("✅ Base dependencies installed")
+            logger.debug(f"Install command output: {result.stdout}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"❌ Failed to install base dependencies: {str(e)}")
+            logger.error(f"Command output: {e.stdout}")
+            logger.error(f"Error output: {e.stderr}")
+            raise
 
         # Install react-router-dom
-        logger.info("Installing react-router-dom...")
-        subprocess.run(
-            "bun add react-router-dom react-icons lucide-react",
-            shell=True,
-            check=True,
-            cwd=app_dir
-        )
-        logger.info("✅ react-router-dom installed")
+        logger.info("Installing react-router-dom and related packages...")
+        try:
+            result = subprocess.run(
+                "bun add react-router-dom react-icons lucide-react",
+                shell=True,
+                check=True,
+                cwd=app_dir,
+                capture_output=True,
+                text=True
+            )
+            logger.info("✅ react-router-dom and related packages installed")
+            logger.debug(f"Install command output: {result.stdout}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"❌ Failed to install react-router-dom: {str(e)}")
+            logger.error(f"Command output: {e.stdout}")
+            logger.error(f"Error output: {e.stderr}")
+            raise
 
         # Install Tailwind CSS and its dependencies
         logger.info("Installing Tailwind CSS and dependencies...")
-        subprocess.run(
-            "bun add -d tailwindcss@3 postcss autoprefixer",
-            shell=True,
-            check=True,
-            cwd=app_dir
-        )
-        logger.info("✅ Tailwind CSS and dependencies installed")
+        try:
+            result = subprocess.run(
+                "bun add -d tailwindcss@3 postcss autoprefixer",
+                shell=True,
+                check=True,
+                cwd=app_dir,
+                capture_output=True,
+                text=True
+            )
+            logger.info("✅ Tailwind CSS and dependencies installed")
+            logger.debug(f"Install command output: {result.stdout}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"❌ Failed to install Tailwind: {str(e)}")
+            logger.error(f"Command output: {e.stdout}")
+            logger.error(f"Error output: {e.stderr}")
+            raise
         
         # Initialize Tailwind CSS configuration
         logger.info("Initializing Tailwind configuration...")
         try:
-            subprocess.run(
+            result = subprocess.run(
                 "bunx tailwindcss@3 init -p",
                 shell=True,
                 check=True,
@@ -720,86 +770,36 @@ async def create_react_app():
                 capture_output=True,
                 text=True
             )
+            logger.info("✅ Tailwind configuration initialized")
+            logger.debug(f"Init command output: {result.stdout}")
         except subprocess.CalledProcessError as e:
-            logger.error(f"❌ Failed to initialize Tailwind: {e.stderr}")
-            raise
-
-        # Update tailwind.config.js
-        logger.info("Updating tailwind.config.js...")
-        try:
-            tailwind_config = """/** @type {import('tailwindcss').Config} */
-export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
-  theme: {
-    extend: {},
-  },
-  plugins: [],
-}
-"""
-            config_path = Path(app_dir) / "tailwind.config.js"
-            logger.info(f"Writing config to: {config_path}")
-            with open(config_path, "w") as f:
-                f.write(tailwind_config)
-            logger.info("✅ Successfully wrote tailwind.config.js")
-        except Exception as e:
-            logger.error(f"❌ Failed to write tailwind.config.js: {str(e)}")
+            logger.error(f"❌ Failed to initialize Tailwind: {str(e)}")
+            logger.error(f"Command output: {e.stdout}")
+            logger.error(f"Error output: {e.stderr}")
             raise
         
-        # Update src/index.css with Tailwind directives at the top
-        logger.info("Updating index.css with Tailwind directives...")
-        tailwind_css = """@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-"""  # Note the extra newline
-        try:
-            # Read existing content
-            with open(app_dir / "src" / "index.css", "r") as f:
-                existing_content = f.read()
-            logger.debug(f"Existing index.css content: {existing_content}")
-            
-            # Remove first line if it's a comment (contains //) and not a Tailwind directive
-            content_lines = existing_content.splitlines()
-            if content_lines and '//' in content_lines[0] and not content_lines[0].startswith('@tailwind'):
-                existing_content = '\n'.join(content_lines[1:])
-                logger.info("Removed comment line from index.css")
-            
-            # Write directives at top followed by existing content
-            with open(app_dir / "src" / "index.css", "w") as f:
-                f.write(tailwind_css + existing_content)
-            logger.info("✅ Successfully updated index.css")
-                
-        except FileNotFoundError:
-            # If file doesn't exist, create it with just the directives
-            logger.warning("index.css not found, creating new file")
-            with open(app_dir / "src" / "index.css", "w") as f:
-                f.write(tailwind_css)
-            
         logger.info("✅ Tailwind CSS configured successfully")
 
         # Fix main.tsx App import
-        logger.info("Fixing App import in main.tsx...")
-        try:
-            main_path = app_dir / "src" / "main.tsx"
-            with open(main_path, "r") as f:
-                content = f.read()
+        # logger.info("Fixing App import in main.tsx...")
+        # try:
+        #     main_path = app_dir / "src" / "main.tsx"
+        #     with open(main_path, "r") as f:
+        #         content = f.read()
             
             # Replace the default import with named import
-            fixed_content = content.replace(
-                "import App from './App.tsx'",
-                "import { App } from './App.tsx'"
-            )
+            # fixed_content = content.replace(
+            #     "import App from './App.tsx'",
+            #     "import { App } from './App.tsx'"
+            # )
             
-            with open(main_path, "w") as f:
-                f.write(fixed_content)
-            logger.info("✅ Fixed App import in main.tsx")
+            # with open(main_path, "w") as f:
+            #     f.write(fixed_content)
+            # logger.info("✅ Fixed App import in main.tsx")
             
-        except Exception as e:
-            logger.error(f"❌ Failed to fix App import: {str(e)}")
-            raise
+        # except Exception as e:
+        #     logger.error(f"❌ Failed to fix App import: {str(e)}")
+        #     raise
 
         return True
 
@@ -870,8 +870,8 @@ async def blueprint_agent(input: str, config: dict, session: aiohttp.ClientSessi
     2. When listing local imports, always include the full file extension:
        - Use .tsx for React TypeScript components
        - Use .ts for TypeScript files
-       - Use .css for stylesheets
-       Example: 'components/HabitList.tsx' instead of 'components/HabitList'
+       - Use .css for stylesheets (but DO NOT create layout.css or any separate style files - use Tailwind classes instead)
+    3. All styling should be done with Tailwind classes directly in the components - DO NOT create separate CSS files.
 
     Project Description:
     ```
@@ -1128,85 +1128,139 @@ async def generate_file_code(file_info: dict, blueprint: dict, prop_contracts: d
     """
     Generates code for a single file based on the blueprint specifications and prop contracts.
     """
-    
-    # Find matching prop contract if it exists
-    contract = None
-    if "prop_contracts" in config:
-        for c in config["prop_contracts"]["contracts"]:
-            if c["path"] == file_info["path"]:
-                contract = c
-                break
-    
-    contract_info = ""
-    if contract:
-        contract_info = f"""
-        PROPS INTERFACE:
-        {contract['propsInterface']}
+    logger.info(f"🔥 Generating file: {file_info['path']}")
+    # Special handling for index.css
+    if file_info['path'].endswith('index.css'):
+        logger.info(f"🔥 Matched index.css file!")
+        required_body_css = """
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-width: 100vw;
+  width: 100%;
+}
+"""
+        logger.info("🔥 Generating index.css with required body CSS")
+        logger.debug(f"Required CSS template:\n{required_body_css}")
         
-        Required Props: {', '.join(contract['required'])}
-        Optional Props: {', '.join(contract['optional'])}
+        prompt = f"""Generate the CSS code for the index.css file. 
+        ALWAYS include this exact CSS at the start of the file (do not modify it):
+        {required_body_css}
+
+        Then add any additional styles needed for:
+        {file_info['summary']}
         """
-    
-    prompt = f"""Generate optimized React TypeScript code for this file. Follow these requirements:
+        
+        try:
+            config["fx"] = "file_generation"
+            api_output = await make_api_call(prompt, config, session)
+            generated_css = api_output["content"]
+            
+            # Verify the required CSS is included
+            if required_body_css.strip() not in generated_css.strip():
+                logger.warning("🔥 Required CSS not found in generated output, enforcing it")
+                generated_css = required_body_css + "\n" + generated_css
+            
+            logger.info("🔥 Successfully generated index.css with required body CSS")
+            logger.debug(f"Final CSS output:\n{generated_css}")
+            
+            return generated_css
+            
+        except Exception as e:
+            logger.error(f"🔥 Failed to generate index.css: {str(e)}")
+            raise
+    else:
+        logger.info(f"🔥 Not index.css, generating regular file: {file_info['path']}")
+        # Find matching prop contract if it exists
+        contract = None
+        if "prop_contracts" in config:
+            for c in config["prop_contracts"]["contracts"]:
+                if c["path"] == file_info["path"]:
+                    contract = c
+                    break
+        
+        contract_info = ""
+        if contract:
+            contract_info = f"""
+            PROPS INTERFACE:
+            {contract['propsInterface']}
+            
+            Required Props: {', '.join(contract['required'])}
+            Optional Props: {', '.join(contract['optional'])}
+            """
+        
+        prompt = f"""Generate optimized React TypeScript code for this file. Follow these requirements:
 
-    File Path: {file_info['path']}
-    Summary: {file_info['summary']}
-    Required Exports: {', '.join(file_info['exports'])}
-    
-    Allowed Imports:
-    NPM Packages: {', '.join(file_info['imports']['npm'])}
-    Local Files: {', '.join(file_info['imports']['local'])}
+        File Path: {file_info['path']}
+        Summary: {file_info['summary']}
+        Required Exports: {', '.join(file_info['exports'])}
+        
+        Allowed Imports:
+        NPM Packages: {', '.join(file_info['imports']['npm'])}
+        Local Files: {', '.join(file_info['imports']['local'])}
 
-    {contract_info}
+        {contract_info}
 
-    CRITICAL REQUIREMENTS:
-    1. Use ONLY the specified imports
-    2. Implement ALL specified exports
-    3. Use Tailwind CSS for styling
-    4. Follow React + TypeScript best practices
-    5. Include JSDoc comments for components and functions
-    6. Implement props interface EXACTLY as specified
-    7. Use all required props in the component implementation
-    8. ALWAYS use destructured imports for local files, e.g.:
-       import {{ ComponentName }} from './ComponentName'
-       NOT: import ComponentName from './ComponentName'
+        CRITICAL REQUIREMENTS:
+        1. Use ONLY the specified imports
+        2. Implement ALL specified exports
+        3. Use Tailwind CSS for styling
+        4. Follow React + TypeScript best practices
+        5. Include JSDoc comments for components and functions
+        6. Implement props interface EXACTLY as specified
+        7. Use all required props in the component implementation
+        8. ALWAYS use destructured imports for local files, e.g.:
+           import {{ ComponentName }} from './ComponentName'
+           NOT: import ComponentName from './ComponentName'
 
-    PERFORMANCE OPTIMIZATION REQUIREMENTS WHEN WRITING .tsx OR .ts FILES:
-    1. Memoize components that receive props using React.memo when appropriate
-    2. Move object/array literals outside component definitions or use useMemo
-    3. Use useCallback for event handlers and function props
-    4. Avoid inline styles - use Tailwind classes instead
-    5. If using Context, split into smaller contexts to prevent unnecessary rerenders
-    6. Place expensive computations inside useMemo hooks
-    7. Define callback functions with useCallback when passed as props
-    8. Extract complex child components to prevent parent rerenders from affecting them
+        PERFORMANCE OPTIMIZATION REQUIREMENTS WHEN WRITING .tsx OR .ts FILES:
+        1. Memoize components that receive props using React.memo when appropriate
+        2. Move object/array literals outside component definitions or use useMemo
+        3. Use useCallback for event handlers and function props
+        4. Avoid inline styles - use Tailwind classes instead
+        5. If using Context, split into smaller contexts to prevent unnecessary rerenders
+        6. Place expensive computations inside useMemo hooks
+        7. Define callback functions with useCallback when passed as props
+        8. Extract complex child components to prevent parent rerenders from affecting them
 
-    Example optimization patterns to follow:
-    ```typescript
-    // Stable object definitions outside component
-    const defaultStyles = (curly bracket here) padding: '1rem' (curly bracket here);
+        Example optimization patterns to follow:
+        ```typescript
+        // Stable object definitions outside component
+        const defaultStyles = (curly bracket here) padding: '1rem' (curly bracket here);
 
 
-    // Memoized component with proper prop types
-    const MyComponent = React.memo(((bracket here)data, onAction (bracket here): MyComponentProps) => (curly bracket here)
-      // Memoized expensive computations
-      const processedData = useMemo(() => expensiveProcess(data), [data]);
-      
-      // Stable callback functions
-      const handleClick = useCallback(() => (curly bracket here)
-        onAction(processedData);
-      (curly bracket here), [onAction, processedData]);
+        // Memoized component with proper prop types
+        const MyComponent = React.memo(((bracket here)data, onAction (bracket here): MyComponentProps) => (curly bracket here)
+          // Memoized expensive computations
+          const processedData = useMemo(() => expensiveProcess(data), [data]);
+          
+          // Stable callback functions
+          const handleClick = useCallback(() => (curly bracket here)
+            onAction(processedData);
+          (curly bracket here), [onAction, processedData]);
 
-      return (
-        <div className="p-4 bg-white rounded-lg shadow">
-          (curly bracket here) /* Use Tailwind styles */(curly bracket here)
-        </div>
-      );
-    (curly bracket here));
-    ```
+          return (
+            <div className="p-4 bg-white rounded-lg shadow">
+              (curly bracket here) /* Use Tailwind styles */(curly bracket here)
+            </div>
+          );
+        (curly bracket here));
+        ```
 
-    Return ONLY the complete file code, no explanations or markdown.
-    """
+        Return ONLY the complete file code, no explanations or markdown.
+        """
 
     try:
         config["fx"] = "file_generation"
@@ -1517,6 +1571,7 @@ async def execute_workflow(description: str):
     3. Creates prop contracts for each component.
     4. Generates code for each file using the blueprint and prop contracts.
     5. Iteratively checks for build errors and attempts to fix them.
+    6. Starts the Vite dev server.
     """
     try:
         success = await create_react_app()
@@ -1595,7 +1650,26 @@ async def execute_workflow(description: str):
                 except Exception as e:
                     logger.error(f"Error processing file {file_info['path']}: {str(e)}")
                     continue
-
+        # if file index css exists and has a tag called body, replace it with our specific body rule
+        index_css_path = Path("my-react-app/src/index.css")
+        if index_css_path.exists():
+            with open(index_css_path, 'r') as f:
+                content = f.read()
+            
+            # Use regex to find and replace the body rule
+            body_rule = re.compile(r'body\s*{[^}]*}')
+            new_body_rule = """body {
+  margin: 0;
+  padding: 0;
+  min-width: 100vw;
+  width: 100%;
+}"""
+            
+            if body_rule.search(content):
+                content = body_rule.sub(new_body_rule, content)
+                with open(index_css_path, 'w') as f:
+                    f.write(content)
+        
         logger.info("Workflow: Execution completed successfully")
 
         # Create final zip archive
@@ -1604,6 +1678,22 @@ async def execute_workflow(description: str):
             logger.info("✅ Successfully created project_files.zip")
         except Exception as e:
             logger.error(f"Error creating zip archive: {str(e)}")
+
+        # Start the Vite dev server
+        # logger.info("Starting Vite dev server...")
+        # try:
+        #     subprocess.Popen(
+        #         # Add host flag to allow external access
+        #         "bun run dev --host 0.0.0.0 --port 5174",
+        #         shell=True,
+        #         cwd="my-react-app",
+        #         stdout=subprocess.PIPE,
+        #         stderr=subprocess.PIPE
+        #     )
+        #     logger.info("✅ Vite dev server started on http://localhost:5174")
+        # except Exception as e:
+        #     logger.error(f"Failed to start Vite dev server: {str(e)}")
+        #     raise
 
     except Exception as e:
         logger.error("Workflow: Execution failed")

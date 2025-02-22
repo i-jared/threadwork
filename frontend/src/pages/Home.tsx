@@ -9,33 +9,37 @@ import { AlertCircle, Loader2, CreditCard, Sparkles } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { motion, AnimatePresence } from "framer-motion"
 import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 
 export default function HomePage() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [projectDescription, setProjectDescription] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [showFullScreenLoader, setShowFullScreenLoader] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
+    setShowFullScreenLoader(true)
     setError(null)
 
     try {
       // Check credits first
-      const { data: credits, error: creditsError } = await supabase
-        .from('credits')
-        .select('credit_amount')
-        .single()
+      // const { data: credits, error: creditsError } = await supabase
+      //   .from('credits')
+      //   .select('credit_amount')
+      //   .single()
 
-      if (creditsError) throw creditsError
+      // if (creditsError) throw creditsError
 
-      if (!credits || credits.credit_amount < 1) {
-        navigate('/billing')
-        return
-      }
+      // if (!credits || credits.credit_amount < 1) {
+      //   navigate('/billing')
+      //   return
+      // }
 
-      // Create project
+      // Create project and run agent
+      console.log("Sending description:", projectDescription)
       const response = await fetch('http://localhost:8000/create-project', {
         method: 'POST',
         headers: {
@@ -44,13 +48,24 @@ export default function HomePage() {
         body: JSON.stringify({ description: projectDescription }),
       })
 
-      if (!response.ok) throw new Error('Failed to create project')
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to create project')
+      }
+
+      // Wait a moment for the Vite server to start
+      await new Promise(resolve => setTimeout(resolve, 500))
       
-      navigate('/success')
+      // Navigate to the Vite dev server
+      window.location.href = 'http://localhost:5174'
+      
     } catch (e) {
+      console.error("Error:", e) // Log any errors
       setError(e instanceof Error ? e.message : 'An error occurred')
     } finally {
       setLoading(false)
+      setShowFullScreenLoader(false)
     }
   }
 
@@ -177,6 +192,44 @@ export default function HomePage() {
           </CardContent>
         </Card>
       </motion.div>
+
+      <AnimatePresence>
+        {showFullScreenLoader && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50"
+          >
+            <div className="fixed left-[50%] top-[50%] -translate-x-[50%] -translate-y-[50%]">
+              <div className="space-y-8">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="relative">
+                    <div className={cn(
+                      "h-24 w-24 rounded-full",
+                      "border-4 border-primary/10 border-t-primary",
+                      "animate-spin"
+                    )} />
+                    <Sparkles className="h-8 w-8 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-primary animate-pulse" />
+                  </div>
+                  <div className="space-y-2 text-center">
+                    <h3 className="text-xl font-semibold">Creating Your Project</h3>
+                    <p className="text-muted-foreground">
+                      Our AI is working on your request...
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="space-y-2">
+                  <div className="h-1 w-48 overflow-hidden rounded-full bg-primary/20">
+                    <div className="h-full w-1/2 bg-primary animate-[loading_1s_ease-in-out_infinite]" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 } 

@@ -2,5 +2,6 @@
 .cursorrules
 __pycache__/
 logs/
-tmp/
 node_modules/
+my-react-app/
+.DS_Store

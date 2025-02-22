@@ -1,0 +1,61 @@
+{
+  "build_success": false,
+  "build_errors": [
+    {
+      "file": "src/App.tsx",
+      "line": 23,
+      "column": 42,
+      "code": "TS2739",
+      "message": "Type '{}' is missing the following properties from type 'StatsPageProps': totalHabits, completedHabits, currentStreak, longestStreak",
+      "raw": "src/App.tsx(23,42): error TS2739: Type '{}' is missing the following properties from type 'StatsPageProps': totalHabits, completedHabits, currentStreak, longestStreak"
+    },
+    {
+      "file": "src/components/AddHabitForm.tsx",
+      "line": 2,
+      "column": 23,
+      "code": "TS2307",
+      "message": "Cannot find module './types/Habit' or its corresponding type declarations.",
+      "raw": "src/components/AddHabitForm.tsx(2,23): error TS2307: Cannot find module './types/Habit' or its corresponding type declarations."
+    },
+    {
+      "file": "src/components/HabitItem.tsx",
+      "line": 2,
+      "column": 23,
+      "code": "TS2307",
+      "message": "Cannot find module './types/Habit' or its corresponding type declarations.",
+      "raw": "src/components/HabitItem.tsx(2,23): error TS2307: Cannot find module './types/Habit' or its corresponding type declarations."
+    },
+    {
+      "file": "src/components/HabitItem.tsx",
+      "line": 52,
+      "column": 15,
+      "code": "TS2484",
+      "message": "Export declaration conflicts with exported declaration of 'HabitItemProps'.",
+      "raw": "src/components/HabitItem.tsx(52,15): error TS2484: Export declaration conflicts with exported declaration of 'HabitItemProps'."
+    },
+    {
+      "file": "src/components/Layout.tsx",
+      "line": 19,
+      "column": 8,
+      "code": "TS2739",
+      "message": "Type '{}' is missing the following properties from type 'HeaderProps': title, navLinks",
+      "raw": "src/components/Layout.tsx(19,8): error TS2739: Type '{}' is missing the following properties from type 'HeaderProps': title, navLinks"
+    },
+    {
+      "file": "src/main.tsx",
+      "line": 4,
+      "column": 8,
+      "code": "TS2613",
+      "message": "Module '\"/app/my-react-app/src/App\"' has no default export. Did you mean to use 'import { App } from \"/app/my-react-app/src/App\"' instead?",
+      "raw": "src/main.tsx(4,8): error TS2613: Module '\"/app/my-react-app/src/App\"' has no default export. Did you mean to use 'import { App } from \"/app/my-react-app/src/App\"' instead?"
+    },
+    {
+      "file": "src/pages/HabitsPage.tsx",
+      "line": 32,
+      "column": 8,
+      "code": "TS2739",
+      "message": "Type '{ habits: Habit[]; }' is missing the following properties from type 'HabitListProps': onDelete, onToggle",
+      "raw": "src/pages/HabitsPage.tsx(32,8): error TS2739: Type '{ habits: Habit[]; }' is missing the following properties from type 'HabitListProps': onDelete, onToggle"
+    }
+  ]
+}

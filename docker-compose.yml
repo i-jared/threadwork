@@ -1,14 +1,18 @@
-version: '3.8'
-
 services:
   threadwork:
     build: .
     container_name: threadwork-container
     ports:
       - "8000:8000"
+      - "5174:5174"
     volumes:
       - .:/app
-    command: python /app/main.py
+    command: python /app/server.py
+    healthcheck:
+      test: ["CMD", "bun", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   postgres-data:

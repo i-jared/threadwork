@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
@@ -56,10 +55,10 @@ export default function HomePage() {
 
       // Wait a moment for the Vite server to start
       await new Promise(resolve => setTimeout(resolve, 500))
-      
+
       // Navigate to the Vite dev server
       window.location.href = 'http://localhost:5174'
-      
+
     } catch (e) {
       console.error("Error:", e) // Log any errors
       setError(e instanceof Error ? e.message : 'An error occurred')
@@ -70,7 +69,7 @@ export default function HomePage() {
   }
 
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       className="container mx-auto p-4 max-w-2xl"
@@ -88,7 +87,7 @@ export default function HomePage() {
             AI Powered
           </Badge>
         </motion.div>
-        <motion.p 
+        <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.2 }}
@@ -97,7 +96,7 @@ export default function HomePage() {
           Describe your project and let our AI handle the rest
         </motion.p>
       </div>
-      
+
       <AnimatePresence>
         {error && (
           <motion.div
@@ -143,8 +142,8 @@ export default function HomePage() {
               </div>
 
               <div className="flex flex-col sm:flex-row gap-3">
-                <Button 
-                  type="submit" 
+                <Button
+                  type="submit"
                   disabled={loading}
                   className="group relative"
                 >
@@ -219,7 +218,7 @@ export default function HomePage() {
                     </p>
                   </div>
                 </div>
-                
+
                 <div className="space-y-2">
                   <div className="h-1 w-48 overflow-hidden rounded-full bg-primary/20">
                     <div className="h-full w-1/2 bg-primary animate-[loading_1s_ease-in-out_infinite]" />
@@ -232,4 +231,4 @@ export default function HomePage() {
       </AnimatePresence>
     </motion.div>
   )
-} 
+}

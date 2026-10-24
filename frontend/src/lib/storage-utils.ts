@@ -25,7 +25,7 @@ export async function createAndUploadProjectZip(
     
     // Upload to project-specific bucket
     const fileName = `project-${projectId}.zip`
-    const { data, error } = await supabase.storage
+    const { error } = await supabase.storage
       .from(bucket_name)
       .upload(fileName, zipBlob, {
         contentType: 'application/zip',
